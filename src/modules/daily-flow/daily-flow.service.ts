@@ -21,6 +21,7 @@ import {
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { DailyFeedItemDto } from './dto/daily-feed-item.dto.js';
 import { DailyStatsDto } from './dto/daily-stats.dto.js';
+import { SUBSCRIPTION_PLANS } from '../../common/constants/index.js';
 
 /**
  * Summary object logged at the end of the daily flow.
@@ -340,10 +341,10 @@ export class DailyFlowService {
       date: today,
     });
 
-    // Get user's subscribed topics
+    // Get user's subscribed topics and subscription plan
     const user = await this.userModel
       .findById(userId)
-      .select('subscribedTopics')
+      .select('subscribedTopics subscription')
       .lean()
       .exec();
 
@@ -362,6 +363,25 @@ export class DailyFlowService {
 
     const subscribedTopicIds = user.subscribedTopics;
 
+    // ── Enforce free-tier feed limit ────────────────────────────────────
+    const userPlan = (user as any).subscription?.plan || 'free';
+    const planConfig = SUBSCRIPTION_PLANS[userPlan as keyof typeof SUBSCRIPTION_PLANS];
+    let feedTopicIds = subscribedTopicIds;
+
+    if (
+      planConfig.maxTopics !== null &&
+      subscribedTopicIds.length > planConfig.maxTopics
+    ) {
+      feedTopicIds = subscribedTopicIds.slice(0, planConfig.maxTopics);
+      this.logger.log({
+        msg: 'Feed restricted to plan limit',
+        userId,
+        plan: userPlan,
+        totalTopics: subscribedTopicIds.length,
+        feedTopics: feedTopicIds.length,
+      });
+    }
+
     // Single aggregation pipeline: DailySelection -> Question -> AiAnswer -> Topic
     const feedItems = await this.dailySelectionModel
       .aggregate([
@@ -369,7 +389,7 @@ export class DailyFlowService {
         {
           $match: {
             date: today,
-            topicId: { $in: subscribedTopicIds },
+            topicId: { $in: feedTopicIds },
           },
         },
 
@@ -424,6 +444,7 @@ export class DailyFlowService {
             answer: {
               content: { $ifNull: ['$answerDoc.answer', ''] },
               generatedAt: { $ifNull: ['$answerDoc.generatedAt', null] },
+              mcqs: { $ifNull: ['$answerDoc.mcqs', []] },
             },
           },
         },

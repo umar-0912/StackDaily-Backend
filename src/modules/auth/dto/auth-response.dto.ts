@@ -47,6 +47,24 @@ class UserResponseInAuth {
     count: number;
     lastActiveDate: Date | null;
   };
+
+  @ApiProperty({
+    description: 'User subscription information',
+    example: {
+      plan: 'free',
+      status: 'active',
+      startDate: null,
+      endDate: null,
+      cancelledAt: null,
+    },
+  })
+  subscription: {
+    plan: string;
+    status: string;
+    startDate: Date | null;
+    endDate: Date | null;
+    cancelledAt: Date | null;
+  };
 }
 
 export class AuthResponseDto {

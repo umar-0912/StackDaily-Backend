@@ -22,16 +22,18 @@ export const validationSchema = Joi.object({
   JWT_EXPIRY: Joi.string().default('1d'),
   JWT_REFRESH_EXPIRY: Joi.string().default('7d'),
 
-  // OpenAI
-  OPENAI_API_KEY: Joi.string().required().messages({
-    'any.required': 'OPENAI_API_KEY is required for AI-powered learning features.',
-  }),
-  OPENAI_MODEL: Joi.string().default('gpt-4'),
+  // OpenAI (optional — AI generation disabled without it)
+  OPENAI_API_KEY: Joi.string().optional().default(''),
+  OPENAI_MODEL: Joi.string().default('gpt-4o-mini'),
 
-  // Firebase Cloud Messaging
-  FCM_PROJECT_ID: Joi.string().required().messages({
-    'any.required': 'FCM_PROJECT_ID is required for push notifications.',
-  }),
+  // Firebase Cloud Messaging (optional — push notifications disabled without it)
+  FCM_PROJECT_ID: Joi.string().optional().default(''),
+
+  // Razorpay (optional — payments disabled without it)
+  RAZORPAY_KEY_ID: Joi.string().optional().default(''),
+  RAZORPAY_KEY_SECRET: Joi.string().optional().default(''),
+  RAZORPAY_WEBHOOK_SECRET: Joi.string().optional().default(''),
+  RAZORPAY_PLAN_ID: Joi.string().optional().default(''),
 });
 
 export const appConfig = registerAs('app', () => ({
@@ -57,4 +59,11 @@ export const openaiConfig = registerAs('openai', () => ({
 
 export const fcmConfig = registerAs('fcm', () => ({
   projectId: process.env.FCM_PROJECT_ID,
+}));
+
+export const razorpayConfig = registerAs('razorpay', () => ({
+  keyId: process.env.RAZORPAY_KEY_ID,
+  keySecret: process.env.RAZORPAY_KEY_SECRET,
+  webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET,
+  planId: process.env.RAZORPAY_PLAN_ID,
 }));

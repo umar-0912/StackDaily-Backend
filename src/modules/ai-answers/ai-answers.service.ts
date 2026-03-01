@@ -20,8 +20,15 @@ import {
 } from '../../database/schemas/question.schema.js';
 import { Topic, TopicDocument } from '../../database/schemas/topic.schema.js';
 
+interface McqItem {
+  question: string;
+  options: string[];
+  correctIndex: number;
+}
+
 interface GenerateAnswerResult {
   answer: string;
+  mcqs: McqItem[];
   tokenCount: number;
 }
 
@@ -100,12 +107,18 @@ export class AiAnswersService implements OnModuleInit {
     const model = this.openaiModel;
 
     const systemPrompt = [
-      `You are an expert developer educator.`,
-      `Provide a clear, concise, and practical answer to the following ${difficulty} level ${topicName} question.`,
-      `Include code examples where relevant.`,
-      `Format the answer in markdown.`,
-      `Keep it under 500 words.`,
+      'You are an expert developer educator.',
+      'Respond ONLY with valid JSON matching this schema:',
+      '{"answer":"string","mcqs":[{"question":"string","options":["string","string","string","string"],"correctIndex":0}]}.',
+      'Rules:',
+      '1) "answer" is a practical, scenario-driven explanation in markdown (under 500 words, include code examples where relevant).',
+      '2) "mcqs" contains exactly 4 multiple-choice questions testing understanding of the answer.',
+      'Each has exactly 4 options and "correctIndex" is the 0-based index of the correct option.',
+      '3) MCQs should test application of concepts, not just definitions. Include code-based questions where relevant.',
+      '4) No text outside the JSON object.',
     ].join(' ');
+
+    const userPrompt = `Topic: ${topicName} | Difficulty: ${difficulty}\n\n${questionText}`;
 
     let lastError: Error | undefined;
 
@@ -114,17 +127,19 @@ export class AiAnswersService implements OnModuleInit {
         const response = await this.openai.chat.completions.create({
           model,
           temperature: 0.7,
-          max_tokens: 1_000,
+          max_tokens: 1_500,
+          response_format: { type: 'json_object' },
           messages: [
             { role: 'system', content: systemPrompt },
-            { role: 'user', content: questionText },
+            { role: 'user', content: userPrompt },
           ],
         });
 
-        const answer = response.choices[0]?.message?.content ?? '';
+        const raw = response.choices[0]?.message?.content ?? '{}';
         const tokenCount = response.usage?.total_tokens ?? 0;
 
-        return { answer, tokenCount };
+        const parsed = this.parseAiResponse(raw);
+        return { ...parsed, tokenCount };
       } catch (error: any) {
         lastError = error;
         const isRetryable = this.isRetryableError(error);
@@ -203,7 +218,7 @@ export class AiAnswersService implements OnModuleInit {
     const topic = question.topicId as unknown as TopicDocument;
     const topicName = topic?.name ?? 'General';
 
-    const { answer, tokenCount } = await this.generateAnswer(
+    const { answer, mcqs, tokenCount } = await this.generateAnswer(
       question.text,
       topicName,
       question.difficulty,
@@ -216,6 +231,7 @@ export class AiAnswersService implements OnModuleInit {
       {
         $set: {
           answer,
+          mcqs,
           generatedAt: new Date(),
           model,
           tokenCount,
@@ -431,6 +447,55 @@ export class AiAnswersService implements OnModuleInit {
       .exec();
 
     return result[0]?.count ?? 0;
+  }
+
+  /**
+   * Safely parse the structured JSON response from OpenAI.
+   * Validates each MCQ for correct shape. Falls back to raw text with
+   * empty MCQs on parse failure.
+   */
+  private parseAiResponse(raw: string): { answer: string; mcqs: McqItem[] } {
+    let parsed: any;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      this.logger.warn(
+        { rawSnippet: raw.substring(0, 200) },
+        'Failed to parse AI response as JSON; falling back to raw text',
+      );
+      return { answer: raw, mcqs: [] };
+    }
+
+    const answer: string =
+      typeof parsed.answer === 'string' ? parsed.answer : raw;
+
+    const mcqs: McqItem[] = [];
+    if (Array.isArray(parsed.mcqs)) {
+      for (const item of parsed.mcqs) {
+        if (
+          typeof item.question === 'string' &&
+          Array.isArray(item.options) &&
+          item.options.length === 4 &&
+          item.options.every((o: unknown) => typeof o === 'string') &&
+          typeof item.correctIndex === 'number' &&
+          item.correctIndex >= 0 &&
+          item.correctIndex <= 3
+        ) {
+          mcqs.push({
+            question: item.question,
+            options: item.options,
+            correctIndex: item.correctIndex,
+          });
+        } else {
+          this.logger.warn(
+            { invalidMcq: item },
+            'Skipping invalid MCQ item from AI response',
+          );
+        }
+      }
+    }
+
+    return { answer, mcqs };
   }
 
   /**

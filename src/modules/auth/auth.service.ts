@@ -2,6 +2,7 @@ import {
   Injectable,
   ConflictException,
   UnauthorizedException,
+  BadRequestException,
   InternalServerErrorException,
 } from '@nestjs/common';
 import { JwtService, JwtSignOptions } from '@nestjs/jwt';
@@ -15,7 +16,10 @@ import { User, UserDocument } from '../../database/schemas/user.schema.js';
 import { SignupDto } from './dto/signup.dto.js';
 import { LoginDto } from './dto/login.dto.js';
 import { AuthResponseDto } from './dto/auth-response.dto.js';
-import { ERROR_MESSAGES } from '../../common/constants/index.js';
+import {
+  ERROR_MESSAGES,
+  SUBSCRIPTION_PLANS,
+} from '../../common/constants/index.js';
 import { JwtPayload } from './strategies/jwt.strategy.js';
 
 interface SafeUser {
@@ -68,10 +72,22 @@ export class AuthService {
         );
       }
 
+      // Enforce free tier topic limit during signup
+      const freeMaxTopics = SUBSCRIPTION_PLANS.free.maxTopics;
+      if (
+        dto.subscribedTopics &&
+        freeMaxTopics !== null &&
+        dto.subscribedTopics.length > freeMaxTopics
+      ) {
+        throw new BadRequestException(
+          `New accounts can subscribe to a maximum of ${freeMaxTopics} topics.`,
+        );
+      }
+
       // Hash the password
       const hashedPassword = await bcrypt.hash(dto.password, AuthService.BCRYPT_ROUNDS);
 
-      // Create the user
+      // Create the user (subscription defaults to free/active via schema)
       const user = await this.userModel.create({
         email: dto.email.toLowerCase(),
         username: dto.username.toLowerCase(),
@@ -102,7 +118,8 @@ export class AuthService {
     } catch (error) {
       if (
         error instanceof ConflictException ||
-        error instanceof UnauthorizedException
+        error instanceof UnauthorizedException ||
+        error instanceof BadRequestException
       ) {
         throw error;
       }

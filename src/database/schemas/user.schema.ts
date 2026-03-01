@@ -8,6 +8,17 @@ export enum UserRole {
   ADMIN = 'admin',
 }
 
+export enum SubscriptionPlan {
+  FREE = 'free',
+  PRO = 'pro',
+}
+
+export enum SubscriptionStatus {
+  ACTIVE = 'active',
+  CANCELLED = 'cancelled',
+  EXPIRED = 'expired',
+}
+
 @Schema({
   timestamps: true,
   toJSON: {
@@ -85,9 +96,51 @@ export class User {
     default: true,
   })
   isActive: boolean;
+
+  @Prop({
+    type: {
+      plan: {
+        type: String,
+        enum: SubscriptionPlan,
+        default: SubscriptionPlan.FREE,
+      },
+      status: {
+        type: String,
+        enum: SubscriptionStatus,
+        default: SubscriptionStatus.ACTIVE,
+      },
+      startDate: { type: Date, default: null },
+      endDate: { type: Date, default: null },
+      cancelledAt: { type: Date, default: null },
+    },
+    default: {
+      plan: SubscriptionPlan.FREE,
+      status: SubscriptionStatus.ACTIVE,
+      startDate: null,
+      endDate: null,
+      cancelledAt: null,
+    },
+    _id: false,
+  })
+  subscription: {
+    plan: SubscriptionPlan;
+    status: SubscriptionStatus;
+    startDate: Date | null;
+    endDate: Date | null;
+    cancelledAt: Date | null;
+  };
+
+  @Prop({ type: String, default: null, index: true })
+  razorpayCustomerId: string | null;
+
+  @Prop({ type: String, default: null, index: true })
+  razorpaySubscriptionId: string | null;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
 
 // Compound index for querying active users by subscribed topics
 UserSchema.index({ isActive: 1, subscribedTopics: 1 });
+
+// Index for querying users by subscription plan (admin dashboard, stats)
+UserSchema.index({ 'subscription.plan': 1 });
