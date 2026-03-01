@@ -66,10 +66,12 @@ export class NotificationsService implements OnModuleInit {
     const serviceAccountPath = this.configService.get<string>(
       'FIREBASE_SERVICE_ACCOUNT_PATH',
     );
-
+    const serviceAccountJson = this.configService.get<string>(
+      'FIREBASE_SERVICE_ACCOUNT_JSON',
+    );
     const projectId = this.configService.get<string>('fcm.projectId');
 
-    if (!serviceAccountPath && !projectId) {
+    if (!serviceAccountPath && !serviceAccountJson && !projectId) {
       this.logger.warn(
         'Firebase credentials not configured — push notifications disabled',
       );
@@ -77,7 +79,17 @@ export class NotificationsService implements OnModuleInit {
     }
 
     try {
-      if (serviceAccountPath) {
+      if (serviceAccountJson) {
+        // Production: service account passed as env var (e.g., Railway)
+        const serviceAccount = JSON.parse(serviceAccountJson);
+        admin.initializeApp({
+          credential: admin.credential.cert(serviceAccount),
+        });
+        this.logger.log(
+          'Firebase Admin SDK initialized with service account from env var',
+        );
+      } else if (serviceAccountPath) {
+        // Local dev: service account file on disk
         const serviceAccount = JSON.parse(
           readFileSync(serviceAccountPath, 'utf-8'),
         );
@@ -85,7 +97,7 @@ export class NotificationsService implements OnModuleInit {
           credential: admin.credential.cert(serviceAccount),
         });
         this.logger.log(
-          'Firebase Admin SDK initialized with service account credential',
+          'Firebase Admin SDK initialized with service account file',
         );
       } else {
         admin.initializeApp({

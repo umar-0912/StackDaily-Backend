@@ -28,6 +28,8 @@ export const validationSchema = Joi.object({
 
   // Firebase Cloud Messaging (optional — push notifications disabled without it)
   FCM_PROJECT_ID: Joi.string().optional().default(''),
+  FIREBASE_SERVICE_ACCOUNT_JSON: Joi.string().optional().allow('').default(''),
+  FIREBASE_SERVICE_ACCOUNT_PATH: Joi.string().optional().allow('').default(''),
 
   // Razorpay (optional — payments disabled without it)
   RAZORPAY_KEY_ID: Joi.string().optional().default(''),
