@@ -1,6 +1,24 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 
+// ── MCQ sub-document (embedded in AiAnswer) ──────────────────────────────────
+
+@Schema({ _id: false })
+export class Mcq {
+  @Prop({ type: String, required: true })
+  question: string;
+
+  @Prop({ type: [String], required: true })
+  options: string[];
+
+  @Prop({ type: Number, required: true, min: 0, max: 3 })
+  correctIndex: number;
+}
+
+export const McqSchema = SchemaFactory.createForClass(Mcq);
+
+// ── AiAnswer document ────────────────────────────────────────────────────────
+
 export type AiAnswerDocument = HydratedDocument<AiAnswer>;
 
 @Schema({
@@ -54,6 +72,9 @@ export class AiAnswer {
     default: false,
   })
   isStale: boolean;
+
+  @Prop({ type: [McqSchema], default: [] })
+  mcqs: Mcq[];
 }
 
 export const AiAnswerSchema = SchemaFactory.createForClass(AiAnswer);

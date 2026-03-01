@@ -1,5 +1,28 @@
 import { ApiProperty } from '@nestjs/swagger';
 
+class McqResponseDto {
+  @ApiProperty({
+    description: 'The MCQ question text',
+    example: 'What will the following code output?',
+  })
+  question: string;
+
+  @ApiProperty({
+    description: 'Four possible answer options',
+    example: ['undefined', 'null', 'ReferenceError', '0'],
+    type: [String],
+  })
+  options: string[];
+
+  @ApiProperty({
+    description: 'Zero-based index of the correct option (0-3)',
+    example: 2,
+    minimum: 0,
+    maximum: 3,
+  })
+  correctIndex: number;
+}
+
 export class AiAnswerResponseDto {
   @ApiProperty({
     description: 'Unique identifier of the AI answer',
@@ -40,4 +63,11 @@ export class AiAnswerResponseDto {
     required: false,
   })
   tokenCount?: number;
+
+  @ApiProperty({
+    description: 'Multiple-choice questions based on the answer',
+    type: [McqResponseDto],
+    required: false,
+  })
+  mcqs?: McqResponseDto[];
 }

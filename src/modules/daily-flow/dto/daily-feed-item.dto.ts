@@ -51,6 +51,32 @@ class FeedQuestionDto {
 }
 
 /**
+ * Nested DTO representing a single MCQ within a daily feed item.
+ */
+class FeedMcqDto {
+  @ApiProperty({
+    description: 'The MCQ question text',
+    example: 'What will the following code output?',
+  })
+  question: string;
+
+  @ApiProperty({
+    description: 'Four possible answer options',
+    type: [String],
+    example: ['undefined', 'null', 'ReferenceError', '0'],
+  })
+  options: string[];
+
+  @ApiProperty({
+    description: 'Zero-based index of the correct option (0-3)',
+    example: 2,
+    minimum: 0,
+    maximum: 3,
+  })
+  correctIndex: number;
+}
+
+/**
  * Nested DTO representing the AI-generated answer within a daily feed item.
  */
 class FeedAnswerDto {
@@ -68,6 +94,13 @@ class FeedAnswerDto {
     format: 'date-time',
   })
   generatedAt: Date;
+
+  @ApiProperty({
+    description: 'MCQs for self-assessment based on the answer',
+    type: [FeedMcqDto],
+    required: false,
+  })
+  mcqs?: FeedMcqDto[];
 }
 
 /**

@@ -9,12 +9,20 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
-import { User, UserDocument } from '../../database/schemas/user.schema.js';
+import {
+  User,
+  UserDocument,
+  SubscriptionPlan,
+  SubscriptionStatus,
+} from '../../database/schemas/user.schema.js';
 import { Topic, TopicDocument } from '../../database/schemas/topic.schema.js';
 import { UpdateProfileDto } from './dto/update-profile.dto.js';
 import { UpdateSubscriptionsDto } from './dto/update-subscriptions.dto.js';
 import { UpdateFcmTokenDto } from './dto/update-fcm-token.dto.js';
-import { ERROR_MESSAGES } from '../../common/constants/index.js';
+import {
+  ERROR_MESSAGES,
+  SUBSCRIPTION_PLANS,
+} from '../../common/constants/index.js';
 
 @Injectable()
 export class UsersService {
@@ -243,6 +251,19 @@ export class UsersService {
         }
       }
 
+      // ── Enforce subscription tier limits ──────────────────────────
+      const user = await this.userModel.findById(userId).lean().exec();
+      if (!user) {
+        throw new NotFoundException(ERROR_MESSAGES.USER_NOT_FOUND);
+      }
+
+      const plan = user.subscription?.plan || SubscriptionPlan.FREE;
+      this.validateTopicLimit(
+        plan,
+        dto.topicIds.length,
+        user.subscribedTopics?.length || 0,
+      );
+
       // Atomic $set operation to replace subscriptions
       const updatedUser = await this.userModel
         .findByIdAndUpdate(
@@ -435,5 +456,166 @@ export class UsersService {
       );
       throw new InternalServerErrorException(ERROR_MESSAGES.INTERNAL_SERVER_ERROR);
     }
+  }
+
+  // ──────────────────── Subscription Info (user-facing) ────────────────────
+
+  /**
+   * Get the current user's subscription details with computed fields.
+   */
+  async getSubscriptionInfo(userId: string) {
+    this.logger.info({ userId }, 'Fetching subscription info');
+
+    const user = await this.userModel.findById(userId).lean().exec();
+    if (!user) {
+      throw new NotFoundException(ERROR_MESSAGES.USER_NOT_FOUND);
+    }
+
+    const plan = user.subscription?.plan || SubscriptionPlan.FREE;
+    const status = user.subscription?.status || SubscriptionStatus.ACTIVE;
+    const planConfig = SUBSCRIPTION_PLANS[plan];
+    const currentTopicCount = user.subscribedTopics?.length || 0;
+    const isOverLimit =
+      planConfig.maxTopics !== null && currentTopicCount > planConfig.maxTopics;
+
+    let daysRemaining: number | null = null;
+    if (user.subscription?.endDate) {
+      const msRemaining =
+        new Date(user.subscription.endDate).getTime() - Date.now();
+      daysRemaining = Math.max(
+        0,
+        Math.ceil(msRemaining / (1000 * 60 * 60 * 24)),
+      );
+    }
+
+    return {
+      plan,
+      status,
+      maxTopics: planConfig.maxTopics,
+      currentTopicCount,
+      isOverLimit,
+      startDate: user.subscription?.startDate || null,
+      endDate: user.subscription?.endDate || null,
+      daysRemaining,
+    };
+  }
+
+  // ──────────────────── Update Subscription (admin) ────────────────────────
+
+  /**
+   * Admin-only: Update a user's subscription plan.
+   * Handles upgrade (free → pro) and downgrade (pro → free).
+   */
+  async updateUserSubscription(
+    userId: string,
+    plan: SubscriptionPlan,
+    durationDays?: number,
+  ): Promise<User> {
+    this.logger.info({ userId, plan, durationDays }, 'Updating user subscription');
+
+    const user = await this.userModel.findById(userId).lean().exec();
+    if (!user) {
+      throw new NotFoundException(ERROR_MESSAGES.USER_NOT_FOUND);
+    }
+
+    const now = new Date();
+    let updatePayload: Record<string, unknown>;
+
+    if (plan === SubscriptionPlan.PRO) {
+      const endDate = new Date(now);
+      endDate.setDate(endDate.getDate() + (durationDays || 30));
+
+      updatePayload = {
+        'subscription.plan': SubscriptionPlan.PRO,
+        'subscription.status': SubscriptionStatus.ACTIVE,
+        'subscription.startDate': now,
+        'subscription.endDate': endDate,
+        'subscription.cancelledAt': null,
+      };
+    } else {
+      updatePayload = {
+        'subscription.plan': SubscriptionPlan.FREE,
+        'subscription.status': SubscriptionStatus.ACTIVE,
+        'subscription.startDate': null,
+        'subscription.endDate': null,
+        'subscription.cancelledAt': null,
+      };
+    }
+
+    const updatedUser = await this.userModel
+      .findByIdAndUpdate(userId, { $set: updatePayload }, { new: true })
+      .populate({ path: 'subscribedTopics', select: 'name slug icon' })
+      .lean()
+      .exec();
+
+    if (!updatedUser) {
+      throw new InternalServerErrorException(ERROR_MESSAGES.INTERNAL_SERVER_ERROR);
+    }
+
+    this.logger.info(
+      { userId, plan, previousPlan: user.subscription?.plan },
+      'Subscription updated successfully',
+    );
+
+    return updatedUser;
+  }
+
+  // ──────────────────── Subscription Stats (admin) ─────────────────────────
+
+  /**
+   * Admin-only: Get aggregate subscription statistics.
+   */
+  async getSubscriptionStats() {
+    const [totalUsers, proUsers, downgradeWarningUsers] = await Promise.all([
+      this.userModel.countDocuments({ isActive: true }).exec(),
+      this.userModel
+        .countDocuments({
+          isActive: true,
+          'subscription.plan': SubscriptionPlan.PRO,
+          'subscription.status': SubscriptionStatus.ACTIVE,
+        })
+        .exec(),
+      this.userModel
+        .countDocuments({
+          isActive: true,
+          'subscription.plan': { $ne: SubscriptionPlan.PRO },
+          $expr: {
+            $gt: [{ $size: '$subscribedTopics' }, SUBSCRIPTION_PLANS.free.maxTopics],
+          },
+        })
+        .exec(),
+    ]);
+
+    return {
+      totalUsers,
+      freeUsers: totalUsers - proUsers,
+      proUsers,
+      downgradeWarningUsers,
+    };
+  }
+
+  // ──────────────────── Private Helpers ────────────────────────────────────
+
+  /**
+   * Validates whether the requested topic count is allowed under the user's plan.
+   * For downgraded users (over-limit), allows reducing topics but not adding.
+   */
+  private validateTopicLimit(
+    plan: SubscriptionPlan,
+    requestedCount: number,
+    currentCount: number,
+  ): void {
+    const planConfig = SUBSCRIPTION_PLANS[plan];
+
+    // Unlimited plan — no restriction
+    if (planConfig.maxTopics === null) return;
+
+    // Within plan limit — allowed
+    if (requestedCount <= planConfig.maxTopics) return;
+
+    // Over limit — allow only if user is REDUCING topics (downgrade scenario)
+    if (requestedCount <= currentCount) return;
+
+    throw new BadRequestException(ERROR_MESSAGES.SUBSCRIPTION_TOPIC_LIMIT);
   }
 }

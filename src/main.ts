@@ -15,7 +15,17 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
 
   // ─── Body Size Limits ────────────────────────────────────────
-  app.use(json({ limit: '1mb' }));
+  // The verify callback captures the raw body for Razorpay webhook signature verification
+  app.use(
+    json({
+      limit: '1mb',
+      verify: (req: any, _res, buf) => {
+        if (req.url?.includes('/payments/webhook')) {
+          req.rawBody = buf.toString();
+        }
+      },
+    }),
+  );
   app.use(urlencoded({ extended: true, limit: '1mb' }));
 
   // ─── Request Timeout ─────────────────────────────────────────
@@ -78,6 +88,7 @@ async function bootstrap(): Promise<void> {
     .addTag('AI Answers', 'AI-generated answer management')
     .addTag('Notifications', 'Push notification system')
     .addTag('Daily Flow', 'Daily learning feed & orchestration')
+    .addTag('Payments', 'Subscription payments & billing')
     .build();
 
   const document = SwaggerModule.createDocument(app, swaggerConfig);

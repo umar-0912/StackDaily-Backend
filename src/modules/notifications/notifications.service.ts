@@ -67,6 +67,15 @@ export class NotificationsService implements OnModuleInit {
       'FIREBASE_SERVICE_ACCOUNT_PATH',
     );
 
+    const projectId = this.configService.get<string>('fcm.projectId');
+
+    if (!serviceAccountPath && !projectId) {
+      this.logger.warn(
+        'Firebase credentials not configured — push notifications disabled',
+      );
+      return;
+    }
+
     try {
       if (serviceAccountPath) {
         const serviceAccount = JSON.parse(
@@ -79,7 +88,6 @@ export class NotificationsService implements OnModuleInit {
           'Firebase Admin SDK initialized with service account credential',
         );
       } else {
-        const projectId = this.configService.get<string>('fcm.projectId');
         admin.initializeApp({
           projectId,
         });

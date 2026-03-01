@@ -21,6 +21,7 @@ import { UpdateProfileDto } from './dto/update-profile.dto.js';
 import { UpdateSubscriptionsDto } from './dto/update-subscriptions.dto.js';
 import { UpdateFcmTokenDto } from './dto/update-fcm-token.dto.js';
 import { UserResponseDto } from './dto/user-response.dto.js';
+import { SubscriptionInfoDto } from './dto/subscription-info.dto.js';
 
 @ApiTags('Users')
 @ApiBearerAuth('JWT-auth')
@@ -146,5 +147,29 @@ export class UsersController {
     @Body() dto: UpdateFcmTokenDto,
   ): Promise<void> {
     await this.usersService.updateFcmToken(userId.toString(), dto);
+  }
+
+  // ─────────────────── Subscription Info ────────────────────────────────────
+
+  @Get('subscription')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get current subscription details',
+    description:
+      'Returns the current user subscription plan, limits, usage, and remaining time.',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Subscription info retrieved successfully',
+    type: SubscriptionInfoDto,
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'Not authenticated or token expired',
+  })
+  async getSubscriptionInfo(
+    @CurrentUser('_id') userId: string,
+  ): Promise<SubscriptionInfoDto> {
+    return this.usersService.getSubscriptionInfo(userId.toString());
   }
 }

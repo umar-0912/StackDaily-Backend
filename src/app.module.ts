@@ -14,6 +14,7 @@ import {
   jwtConfig,
   openaiConfig,
   fcmConfig,
+  razorpayConfig,
 } from './common/config/index.js';
 import { HEADERS } from './common/constants/index.js';
 import { HealthController } from './common/health/health.controller.js';
@@ -24,13 +25,14 @@ import { QuestionsModule } from './modules/questions/questions.module.js';
 import { AiAnswersModule } from './modules/ai-answers/ai-answers.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
 import { DailyFlowModule } from './modules/daily-flow/daily-flow.module.js';
+import { PaymentsModule } from './modules/payments/payments.module.js';
 
 @Module({
   imports: [
     // ─── Configuration ──────────────────────────────────────────
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, databaseConfig, jwtConfig, openaiConfig, fcmConfig],
+      load: [appConfig, databaseConfig, jwtConfig, openaiConfig, fcmConfig, razorpayConfig],
       validationSchema,
       validationOptions: {
         abortEarly: false,
@@ -116,6 +118,7 @@ import { DailyFlowModule } from './modules/daily-flow/daily-flow.module.js';
     AiAnswersModule,
     NotificationsModule,
     DailyFlowModule,
+    PaymentsModule,
   ],
   controllers: [HealthController],
 })

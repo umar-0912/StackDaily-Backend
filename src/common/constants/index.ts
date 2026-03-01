@@ -34,6 +34,22 @@ export const ERROR_MESSAGES = {
 
   // Lessons
   LESSON_NOT_FOUND: 'Lesson not found.',
+
+  // Subscriptions
+  SUBSCRIPTION_TOPIC_LIMIT:
+    'Your Free plan allows up to 3 topic subscriptions. Upgrade to Pro for unlimited topics.',
+  SUBSCRIPTION_DOWNGRADE_REDUCE:
+    'You have more topics than your current plan allows. Please reduce your subscriptions before adding new ones.',
+
+  // Payments
+  PAYMENT_ALREADY_PRO: 'You already have an active Pro subscription.',
+  PAYMENT_SUBSCRIPTION_CREATION_FAILED:
+    'Failed to create subscription. Please try again.',
+  PAYMENT_CANCELLATION_FAILED:
+    'Failed to cancel subscription. Please try again.',
+  PAYMENT_NO_ACTIVE_SUBSCRIPTION:
+    'No active subscription found to cancel.',
+  PAYMENT_WEBHOOK_INVALID_SIGNATURE: 'Invalid webhook signature.',
 } as const;
 
 /**
@@ -60,4 +76,24 @@ export const APP_META = {
   APP_NAME: 'Micro Learner API',
   APP_VERSION: '1.0.0',
   APP_DESCRIPTION: 'A micro-learning platform powered by AI',
+} as const;
+
+/**
+ * Subscription plan configuration.
+ * maxTopics: null means unlimited.
+ * priceInPaise: stored in smallest currency unit (paise for INR).
+ */
+export const SUBSCRIPTION_PLANS = {
+  free: {
+    name: 'Free',
+    maxTopics: 3,
+    priceInPaise: 0,
+    durationDays: null,
+  },
+  pro: {
+    name: 'Pro',
+    maxTopics: null,
+    priceInPaise: 3000,
+    durationDays: 30,
+  },
 } as const;

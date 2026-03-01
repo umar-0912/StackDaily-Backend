@@ -5,6 +5,7 @@ import { User, UserSchema } from '../../database/schemas/user.schema.js';
 import { Topic, TopicSchema } from '../../database/schemas/topic.schema.js';
 import { UsersService } from './users.service.js';
 import { UsersController } from './users.controller.js';
+import { AdminController } from './admin.controller.js';
 
 @Module({
   imports: [
@@ -13,7 +14,7 @@ import { UsersController } from './users.controller.js';
       { name: Topic.name, schema: TopicSchema },
     ]),
   ],
-  controllers: [UsersController],
+  controllers: [UsersController, AdminController],
   providers: [UsersService],
   exports: [UsersService],
 })
