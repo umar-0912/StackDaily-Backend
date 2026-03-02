@@ -132,12 +132,15 @@ export class NotificationsController {
       };
     }
 
+    const title = dto.title || '🔔 StackDaily Test';
+    const body = dto.body || 'If you see this, push notifications are working!';
+
     const log = await this.notificationsService.sendToUser(
       user._id.toString(),
       user.fcmToken,
       {
-        title: dto.title,
-        body: dto.body,
+        title,
+        body,
         data: dto.data,
       },
     );

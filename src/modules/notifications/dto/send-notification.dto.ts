@@ -6,21 +6,21 @@ import { IsString, IsObject, IsOptional, IsNotEmpty } from 'class-validator';
  * Used by the test notification endpoint and internal callers.
  */
 export class SendNotificationDto {
-  @ApiProperty({
-    description: 'Title of the push notification',
+  @ApiPropertyOptional({
+    description: 'Title of the push notification (defaults to "StackDaily Test")',
     example: 'New Daily Question!',
   })
   @IsString()
-  @IsNotEmpty()
-  title: string;
+  @IsOptional()
+  title?: string;
 
-  @ApiProperty({
-    description: 'Body text of the push notification',
+  @ApiPropertyOptional({
+    description: 'Body text of the push notification (defaults to a test message)',
     example: 'What is a closure in JavaScript? Tap to learn more.',
   })
   @IsString()
-  @IsNotEmpty()
-  body: string;
+  @IsOptional()
+  body?: string;
 
   @ApiPropertyOptional({
     description:
