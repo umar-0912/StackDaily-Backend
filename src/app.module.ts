@@ -26,6 +26,7 @@ import { AiAnswersModule } from './modules/ai-answers/ai-answers.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
 import { DailyFlowModule } from './modules/daily-flow/daily-flow.module.js';
 import { PaymentsModule } from './modules/payments/payments.module.js';
+import { ProgressModule } from './modules/progress/progress.module.js';
 
 @Module({
   imports: [
@@ -119,6 +120,7 @@ import { PaymentsModule } from './modules/payments/payments.module.js';
     NotificationsModule,
     DailyFlowModule,
     PaymentsModule,
+    ProgressModule,
   ],
   controllers: [HealthController],
 })

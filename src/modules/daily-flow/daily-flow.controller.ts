@@ -80,21 +80,21 @@ export class DailyFlowController {
   // ──────────────────────── POST /mark-read ──────────────────────────────────
 
   /**
-   * Mark a daily selection as read and update the user's streak.
+   * Mark a daily question as read, advance progress, and update streak.
    */
   @Post('mark-read')
   @HttpCode(HttpStatus.OK)
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Mark daily content as read and update streak' })
+  @ApiOperation({ summary: 'Mark daily content as read, advance progress, and update streak' })
   @ApiBody({ type: MarkReadDto })
   @ApiResponse({
     status: HttpStatus.OK,
-    description: 'Content marked as read and streak updated',
+    description: 'Content marked as read, progress advanced, and streak updated',
   })
   @ApiResponse({
     status: HttpStatus.NOT_FOUND,
-    description: 'Daily selection or user not found',
+    description: 'User not found',
   })
   @ApiResponse({
     status: HttpStatus.UNAUTHORIZED,
@@ -109,10 +109,11 @@ export class DailyFlowController {
       msg: 'POST /api/v1/daily/mark-read',
       userId,
       dailySelectionId: dto.dailySelectionId,
+      topicId: dto.topicId,
     });
 
-    await this.dailyFlowService.markAsRead(userId, dto.dailySelectionId);
-    return { message: 'Streak updated' };
+    await this.dailyFlowService.markAsRead(userId, dto.dailySelectionId, dto.topicId);
+    return { message: 'Progress advanced and streak updated' };
   }
 
   // ──────────────────────── GET /stats (admin) ───────────────────────────────
