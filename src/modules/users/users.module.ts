@@ -6,6 +6,7 @@ import { Topic, TopicSchema } from '../../database/schemas/topic.schema.js';
 import { UsersService } from './users.service.js';
 import { UsersController } from './users.controller.js';
 import { AdminController } from './admin.controller.js';
+import { ProgressModule } from '../progress/progress.module.js';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { AdminController } from './admin.controller.js';
       { name: User.name, schema: UserSchema },
       { name: Topic.name, schema: TopicSchema },
     ]),
+    ProgressModule,
   ],
   controllers: [UsersController, AdminController],
   providers: [UsersService],

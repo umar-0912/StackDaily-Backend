@@ -5,6 +5,12 @@ import { ApiProperty } from '@nestjs/swagger';
  */
 class FeedTopicDto {
   @ApiProperty({
+    description: 'Unique topic identifier',
+    example: '665a1b2c3d4e5f6a7b8c9d0e',
+  })
+  _id: string;
+
+  @ApiProperty({
     description: 'Topic display name',
     example: 'JavaScript',
   })
@@ -104,6 +110,37 @@ class FeedAnswerDto {
 }
 
 /**
+ * Nested DTO representing the user's progress within a topic.
+ */
+class FeedProgressDto {
+  @ApiProperty({
+    description: 'Progress status for this topic',
+    enum: ['not_started', 'in_progress', 'completed'],
+    example: 'in_progress',
+  })
+  status: string;
+
+  @ApiProperty({
+    description: 'Number of questions answered so far',
+    example: 12,
+  })
+  questionsAnswered: number;
+
+  @ApiProperty({
+    description: 'Total active questions in this topic',
+    example: 100,
+  })
+  totalQuestions: number;
+
+  @ApiProperty({
+    description: 'Current difficulty level based on position',
+    enum: ['beginner', 'intermediate', 'advanced'],
+    example: 'intermediate',
+  })
+  currentDifficulty: string;
+}
+
+/**
  * DTO for a single item in the user's daily learning feed.
  */
 export class DailyFeedItemDto {
@@ -130,4 +167,10 @@ export class DailyFeedItemDto {
     type: FeedAnswerDto,
   })
   answer: FeedAnswerDto;
+
+  @ApiProperty({
+    description: 'User progress for this topic',
+    type: FeedProgressDto,
+  })
+  progress: FeedProgressDto;
 }

@@ -19,6 +19,7 @@ import {
 } from '../../database/schemas/ai-answer.schema.js';
 
 import { NotificationsService } from '../notifications/notifications.service.js';
+import { ProgressService } from '../progress/progress.service.js';
 import { DailyFeedItemDto } from './dto/daily-feed-item.dto.js';
 import { DailyStatsDto } from './dto/daily-stats.dto.js';
 import { SUBSCRIPTION_PLANS } from '../../common/constants/index.js';
@@ -36,10 +37,9 @@ interface FlowSummary {
 
 /**
  * Service orchestrating the daily learning flow:
- * - Selects a question per active topic
- * - Verifies AI answers exist
- * - Creates DailySelection records (idempotent)
- * - Sends push notifications to subscribed users
+ * - Selects a question per active topic (for admin stats / DailySelection records)
+ * - Sends generic push notifications to subscribed users
+ * - Provides personalized daily feeds via ProgressService
  * - Manages user streaks
  */
 @Injectable()
@@ -58,6 +58,7 @@ export class DailyFlowService {
     @InjectModel(AiAnswer.name)
     private readonly aiAnswerModel: Model<AiAnswerDocument>,
     private readonly notificationsService: NotificationsService,
+    private readonly progressService: ProgressService,
   ) {}
 
   // ──────────────────────────── Helpers ─────────────────────────────────────
@@ -85,14 +86,14 @@ export class DailyFlowService {
    *
    * Steps:
    * 1. Fetch all active topics
-   * 2. Select a question for each topic (least recently used)
+   * 2. Select a question for each topic (least recently used) for admin stats
    * 3. Verify AI answers exist for selected questions
    * 4. Create DailySelection records (idempotent via upsert)
-   * 5. Find subscribed users with FCM tokens per topic
-   * 6. Send push notifications in batches
-   * 7. Log summary
+   * 5. Send generic push notifications to subscribed users
+   * 6. Log summary
    *
-   * Each topic is processed independently; one topic failing does not block others.
+   * Note: The personalized question per user is computed on-demand in getDailyFeed().
+   * The cron job uses generic notifications to avoid per-user DB queries.
    */
   @Cron('0 5 * * *')
   async runDailyFlow(): Promise<void> {
@@ -135,7 +136,7 @@ export class DailyFlowService {
         try {
           const topicId = (topic as { _id: Types.ObjectId })._id;
 
-          // ── Step 2: Select a daily question ────────────────────────────
+          // ── Step 2: Select a daily question (for admin stats) ────────
           // Prefer questions with null lastUsedDate (never used), then oldest.
           // Atomic findOneAndUpdate to claim the question and prevent races.
           const selectedQuestion = await this.questionModel
@@ -244,17 +245,11 @@ export class DailyFlowService {
             topicId: topicId.toString(),
           });
 
-          // ── Step 5+6: Send notifications via NotificationsService ───
-          const questionPreview =
-            selectedQuestion.text.length > 100
-              ? selectedQuestion.text.substring(0, 100) + '...'
-              : selectedQuestion.text;
-
+          // ── Step 5: Send generic notifications ─────────────────────────
           const payload = {
             title: `Daily ${topic.name} Question`,
-            body: questionPreview,
+            body: 'Your next question is ready! Open the app to continue learning.',
             data: {
-              dailySelectionId: dailySelectionId.toString(),
               topicId: topicId.toString(),
             },
           };
@@ -305,7 +300,7 @@ export class DailyFlowService {
         }
       }
 
-      // ── Step 7: Log summary ────────────────────────────────────────────
+      // ── Step 6: Log summary ────────────────────────────────────────────
       summary.durationMs = Date.now() - startTime;
 
       this.logger.log({
@@ -325,20 +320,16 @@ export class DailyFlowService {
   // ──────────────────────────── Daily Feed ───────────────────────────────────
 
   /**
-   * Retrieve the current user's daily learning feed.
+   * Retrieve the current user's personalized daily learning feed.
    *
-   * Uses a single aggregation pipeline with $lookup to avoid N+1 queries:
-   * - Matches today's DailySelection records for the user's subscribed topics
-   * - Joins questions, ai_answers, and topics collections
-   * - Projects the final feed shape
+   * For each subscribed topic, uses ProgressService to determine the next
+   * question based on the user's progress (difficulty-sorted: beginner →
+   * intermediate → advanced). Looks up AI answers and topic metadata.
    */
   async getDailyFeed(userId: string): Promise<DailyFeedItemDto[]> {
-    const today = this.getTodayDate();
-
     this.logger.log({
-      msg: 'Retrieving daily feed',
+      msg: 'Retrieving personalized daily feed',
       userId,
-      date: today,
     });
 
     // Get user's subscribed topics and subscription plan
@@ -382,119 +373,129 @@ export class DailyFlowService {
       });
     }
 
-    // Single aggregation pipeline: DailySelection -> Question -> AiAnswer -> Topic
-    const feedItems = await this.dailySelectionModel
-      .aggregate([
-        // Match today's selections for the user's subscribed topics
-        {
-          $match: {
-            date: today,
-            topicId: { $in: feedTopicIds },
-          },
-        },
-
-        // Join the questions collection
-        {
-          $lookup: {
-            from: 'questions',
-            localField: 'questionId',
-            foreignField: '_id',
-            as: 'questionDoc',
-          },
-        },
-        { $unwind: { path: '$questionDoc', preserveNullAndEmptyArrays: true } },
-
-        // Join the ai_answers collection
-        {
-          $lookup: {
-            from: 'aianswers',
-            localField: 'questionId',
-            foreignField: 'questionId',
-            as: 'answerDoc',
-          },
-        },
-        { $unwind: { path: '$answerDoc', preserveNullAndEmptyArrays: true } },
-
-        // Join the topics collection
-        {
-          $lookup: {
-            from: 'topics',
-            localField: 'topicId',
-            foreignField: '_id',
-            as: 'topicDoc',
-          },
-        },
-        { $unwind: { path: '$topicDoc', preserveNullAndEmptyArrays: true } },
-
-        // Project final shape
-        {
-          $project: {
-            _id: 0,
-            dailySelectionId: { $toString: '$_id' },
-            topic: {
-              name: '$topicDoc.name',
-              slug: '$topicDoc.slug',
-              icon: { $ifNull: ['$topicDoc.icon', null] },
-            },
-            question: {
-              text: '$questionDoc.text',
-              difficulty: '$questionDoc.difficulty',
-              tags: { $ifNull: ['$questionDoc.tags', []] },
-            },
-            answer: {
-              content: { $ifNull: ['$answerDoc.answer', ''] },
-              generatedAt: { $ifNull: ['$answerDoc.generatedAt', null] },
-              mcqs: { $ifNull: ['$answerDoc.mcqs', []] },
-            },
-          },
-        },
-      ])
+    // ── Batch-fetch topic details upfront (avoids N+1) ──────────────────
+    const topicDocs = await this.topicModel
+      .find({ _id: { $in: feedTopicIds } })
+      .select('name slug icon')
+      .lean()
       .exec();
 
+    const topicMap = new Map(
+      topicDocs.map((t) => [t._id.toString(), t]),
+    );
+
+    // ── Build personalized feed per topic (in parallel) ──────────────────
+    const feedItems = await Promise.all(
+      feedTopicIds.map(async (topicId) => {
+        const topicIdStr = topicId.toString();
+
+        try {
+          // Get the next question for this user in this topic
+          const { question, progress } =
+            await this.progressService.getNextQuestion(userId, topicIdStr);
+
+          if (!question) {
+            return null; // No questions available for this topic
+          }
+
+          const questionId = (question as any)._id;
+
+          // Look up AI answer for this question
+          const aiAnswer = await this.aiAnswerModel
+            .findOne({ questionId })
+            .lean()
+            .exec();
+
+          // Get topic from pre-fetched map
+          const topic = topicMap.get(topicIdStr);
+          if (!topic) {
+            return null;
+          }
+
+          // Get total question count for progress calculation
+          const totalQuestions =
+            await this.progressService.countActiveQuestions(topicIdStr);
+
+          // Use a stable ID for the feed item (progress record ID)
+          const feedItemId = (progress as any)._id?.toString() || topicIdStr;
+
+          return {
+            dailySelectionId: feedItemId,
+            topic: {
+              _id: topicIdStr,
+              name: topic.name,
+              slug: topic.slug,
+              icon: (topic as any).icon || null,
+            },
+            question: {
+              text: (question as any).text,
+              difficulty: (question as any).difficulty,
+              tags: (question as any).tags || [],
+            },
+            answer: {
+              content: aiAnswer?.answer || '',
+              generatedAt: aiAnswer?.generatedAt || null,
+              mcqs: aiAnswer?.mcqs || [],
+            },
+            progress: {
+              status: progress.status,
+              questionsAnswered: progress.questionsAnswered,
+              totalQuestions,
+              currentDifficulty: (question as any).difficulty,
+            },
+          } as DailyFeedItemDto;
+        } catch (error: any) {
+          this.logger.error({
+            msg: 'Error building feed item for topic',
+            userId,
+            topicId: topicIdStr,
+            error: error.message,
+          });
+          return null;
+        }
+      }),
+    );
+
+    // Filter out null items (topics with no questions or errors)
+    const validFeedItems = feedItems.filter(
+      (item): item is DailyFeedItemDto => item !== null,
+    );
+
     this.logger.log({
-      msg: 'Daily feed retrieved',
+      msg: 'Personalized daily feed retrieved',
       userId,
-      itemCount: feedItems.length,
+      itemCount: validFeedItems.length,
     });
 
-    return feedItems as DailyFeedItemDto[];
+    return validFeedItems;
   }
 
   // ──────────────────────────── Mark as Read ─────────────────────────────────
 
   /**
-   * Mark a daily selection as read and update the user's streak.
+   * Mark a daily question as read, advance the user's progress, and update streak.
    *
    * Streak logic:
    * - If lastActiveDate is yesterday: increment streak count
    * - If lastActiveDate is today: no change (already counted)
    * - Otherwise (gap or null): reset streak to 1
-   *
-   * Uses findOneAndUpdate for atomicity.
    */
-  async markAsRead(userId: string, dailySelectionId: string): Promise<void> {
+  async markAsRead(
+    userId: string,
+    _dailySelectionId: string,
+    topicId: string,
+  ): Promise<void> {
     const today = this.getTodayDate();
     const yesterday = this.getYesterdayDate();
 
     this.logger.log({
       msg: 'Marking daily content as read',
       userId,
-      dailySelectionId,
+      topicId,
     });
 
-    // Verify the daily selection exists
-    const dailySelection = await this.dailySelectionModel
-      .findById(dailySelectionId)
-      .lean()
-      .exec();
-
-    if (!dailySelection) {
-      this.logger.warn({
-        msg: 'Daily selection not found',
-        dailySelectionId,
-      });
-      throw new NotFoundException('Daily selection not found');
-    }
+    // Advance the user's progress for this topic
+    await this.progressService.advanceProgress(userId, topicId);
 
     // Get current user streak state
     const user = await this.userModel

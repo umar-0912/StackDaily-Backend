@@ -23,6 +23,7 @@ import {
   ERROR_MESSAGES,
   SUBSCRIPTION_PLANS,
 } from '../../common/constants/index.js';
+import { ProgressService } from '../progress/progress.service.js';
 
 @Injectable()
 export class UsersService {
@@ -30,6 +31,7 @@ export class UsersService {
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
     @InjectModel(Topic.name) private readonly topicModel: Model<TopicDocument>,
     @InjectPinoLogger(UsersService.name) private readonly logger: PinoLogger,
+    private readonly progressService: ProgressService,
   ) {}
 
   // ──────────────────────────── Find by ID ───────────────────────────────────
@@ -220,7 +222,8 @@ export class UsersService {
 
   /**
    * Replace the user's topic subscriptions. Validates that all topic IDs exist.
-   * Uses atomic $set operation.
+   * Enforces lifetime topic limit for free users via topicSubscriptionHistory.
+   * Creates UserTopicProgress records for new subscriptions.
    */
   async updateSubscriptions(
     userId: string,
@@ -251,24 +254,31 @@ export class UsersService {
         }
       }
 
-      // ── Enforce subscription tier limits ──────────────────────────
+      // ── Enforce subscription tier limits (lifetime history) ────────
       const user = await this.userModel.findById(userId).lean().exec();
       if (!user) {
         throw new NotFoundException(ERROR_MESSAGES.USER_NOT_FOUND);
       }
 
       const plan = user.subscription?.plan || SubscriptionPlan.FREE;
-      this.validateTopicLimit(
-        plan,
-        dto.topicIds.length,
-        user.subscribedTopics?.length || 0,
+      const currentHistory = (user.topicSubscriptionHistory || []).map(
+        (id: Types.ObjectId) => id.toString(),
       );
+      this.validateTopicLimit(plan, dto.topicIds, currentHistory);
 
-      // Atomic $set operation to replace subscriptions
+      // Atomic update: replace subscriptions + add to lifetime history
+      const topicObjectIds = dto.topicIds.map(
+        (id) => new Types.ObjectId(id),
+      );
       const updatedUser = await this.userModel
         .findByIdAndUpdate(
           userId,
-          { $set: { subscribedTopics: dto.topicIds.map((id) => new Types.ObjectId(id)) } },
+          {
+            $set: { subscribedTopics: topicObjectIds },
+            $addToSet: {
+              topicSubscriptionHistory: { $each: topicObjectIds },
+            },
+          },
           { new: true },
         )
         .populate({
@@ -281,6 +291,14 @@ export class UsersService {
       if (!updatedUser) {
         this.logger.warn({ userId }, 'User not found for subscription update');
         throw new NotFoundException(ERROR_MESSAGES.USER_NOT_FOUND);
+      }
+
+      // Create progress records for new topic subscriptions
+      if (dto.topicIds.length > 0) {
+        await this.progressService.ensureProgressRecords(
+          userId,
+          dto.topicIds,
+        );
       }
 
       this.logger.info(
@@ -597,24 +615,40 @@ export class UsersService {
   // ──────────────────── Private Helpers ────────────────────────────────────
 
   /**
-   * Validates whether the requested topic count is allowed under the user's plan.
-   * For downgraded users (over-limit), allows reducing topics but not adding.
+   * Validates whether the requested topic IDs are allowed under the user's plan.
+   * Uses topicSubscriptionHistory (lifetime) to prevent the subscribe/unsubscribe loophole.
+   *
+   * Logic:
+   * - Compute projected unique topics = history ∪ requested
+   * - If projected count > maxTopics for FREE plan → reject
+   * - Re-subscribing to a topic already in history is always free
+   * - PRO plan has no limit
+   * - Users reducing their subscriptions (even if over limit) are allowed
    */
   private validateTopicLimit(
     plan: SubscriptionPlan,
-    requestedCount: number,
-    currentCount: number,
+    requestedTopicIds: string[],
+    topicSubscriptionHistory: string[],
   ): void {
     const planConfig = SUBSCRIPTION_PLANS[plan];
 
     // Unlimited plan — no restriction
     if (planConfig.maxTopics === null) return;
 
-    // Within plan limit — allowed
-    if (requestedCount <= planConfig.maxTopics) return;
+    // Compute the projected lifetime unique topic count
+    const historySet = new Set(topicSubscriptionHistory);
+    for (const id of requestedTopicIds) {
+      historySet.add(id);
+    }
 
-    // Over limit — allow only if user is REDUCING topics (downgrade scenario)
-    if (requestedCount <= currentCount) return;
+    // If the projected unique count is within the plan limit, allow
+    if (historySet.size <= planConfig.maxTopics) return;
+
+    // Check if all requested topics are already in history (re-subscriptions only)
+    const allInHistory = requestedTopicIds.every((id) =>
+      topicSubscriptionHistory.includes(id),
+    );
+    if (allInHistory) return;
 
     throw new BadRequestException(ERROR_MESSAGES.SUBSCRIPTION_TOPIC_LIMIT);
   }

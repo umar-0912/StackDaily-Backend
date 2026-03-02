@@ -68,6 +68,12 @@ export class User {
   })
   subscribedTopics: Types.ObjectId[];
 
+  @Prop({
+    type: [{ type: Types.ObjectId, ref: 'Topic' }],
+    default: [],
+  })
+  topicSubscriptionHistory: Types.ObjectId[];
+
   @Prop({ type: String })
   fcmToken?: string;
 

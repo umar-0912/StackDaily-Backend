@@ -19,17 +19,14 @@ import {
 import { DailyFlowService } from './daily-flow.service.js';
 import { DailyFlowController } from './daily-flow.controller.js';
 import { NotificationsModule } from '../notifications/notifications.module.js';
+import { ProgressModule } from '../progress/progress.module.js';
 
 /**
  * Module encapsulating the daily flow orchestration:
  * - Cron-based question selection and notification dispatch
- * - User daily feed retrieval
+ * - Personalized user daily feed retrieval via ProgressService
  * - Streak management
  * - Admin stats and manual trigger
- *
- * Uses direct model injection (not service injection from other modules)
- * to avoid circular dependency issues while those modules are still
- * being developed.
  */
 @Module({
   imports: [
@@ -41,6 +38,7 @@ import { NotificationsModule } from '../notifications/notifications.module.js';
       { name: AiAnswer.name, schema: AiAnswerSchema },
     ]),
     NotificationsModule,
+    ProgressModule,
   ],
   controllers: [DailyFlowController],
   providers: [DailyFlowService],

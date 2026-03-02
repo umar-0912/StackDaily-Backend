@@ -37,7 +37,7 @@ export const ERROR_MESSAGES = {
 
   // Subscriptions
   SUBSCRIPTION_TOPIC_LIMIT:
-    'Your Free plan allows up to 3 topic subscriptions. Upgrade to Pro for unlimited topics.',
+    'Free plan allows up to 3 unique topics total. Upgrade to Pro for unlimited topics.',
   SUBSCRIPTION_DOWNGRADE_REDUCE:
     'You have more topics than your current plan allows. Please reduce your subscriptions before adding new ones.',
 
