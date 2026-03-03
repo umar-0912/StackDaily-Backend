@@ -14,13 +14,22 @@ interface TopicSeed {
 
 const INITIAL_TOPICS: TopicSeed[] = [
   {
-    name: 'JavaScript & TypeScript',
-    slug: 'javascript-typescript',
+    name: 'JavaScript',
+    slug: 'javascript',
     category: 'Programming Languages',
     description:
-      'Core JavaScript concepts (ES6+, closures, async patterns) and TypeScript type system (generics, utility types, advanced type-level programming).',
+      'Core JavaScript concepts: ES6+, closures, promises, async/await, event loop, prototypes, and modern patterns.',
     icon: 'javascript',
     sortOrder: 1,
+  },
+  {
+    name: 'TypeScript',
+    slug: 'typescript',
+    category: 'Programming Languages',
+    description:
+      'TypeScript type system: generics, utility types, type guards, declaration files, and advanced type-level programming.',
+    icon: 'typescript',
+    sortOrder: 2,
   },
   {
     name: 'React',
@@ -29,7 +38,7 @@ const INITIAL_TOPICS: TopicSeed[] = [
     description:
       'React fundamentals including hooks, component patterns, state management, performance optimization, and the React ecosystem.',
     icon: 'react',
-    sortOrder: 2,
+    sortOrder: 3,
   },
   {
     name: 'Node.js',
@@ -38,7 +47,7 @@ const INITIAL_TOPICS: TopicSeed[] = [
     description:
       'Node.js runtime internals, event loop, streams, clustering, package management, and server-side JavaScript patterns.',
     icon: 'nodejs',
-    sortOrder: 3,
+    sortOrder: 4,
   },
   {
     name: 'Python',
@@ -47,7 +56,7 @@ const INITIAL_TOPICS: TopicSeed[] = [
     description:
       'Python language features, data structures, decorators, generators, concurrency, and Pythonic best practices.',
     icon: 'python',
-    sortOrder: 4,
+    sortOrder: 5,
   },
   {
     name: 'System Design',
@@ -56,7 +65,7 @@ const INITIAL_TOPICS: TopicSeed[] = [
     description:
       'Distributed systems, scalability patterns, load balancing, caching strategies, database sharding, and microservices architecture.',
     icon: 'system-design',
-    sortOrder: 5,
+    sortOrder: 6,
   },
   {
     name: 'Data Structures',
@@ -65,7 +74,7 @@ const INITIAL_TOPICS: TopicSeed[] = [
     description:
       'Arrays, linked lists, trees, graphs, hash tables, heaps, and their time/space complexity trade-offs.',
     icon: 'data-structures',
-    sortOrder: 6,
+    sortOrder: 7,
   },
   {
     name: 'AWS',
@@ -74,7 +83,7 @@ const INITIAL_TOPICS: TopicSeed[] = [
     description:
       'Amazon Web Services core services including EC2, S3, Lambda, DynamoDB, CloudFormation, and cloud architecture best practices.',
     icon: 'aws',
-    sortOrder: 7,
+    sortOrder: 8,
   },
   {
     name: 'Docker',
@@ -83,7 +92,7 @@ const INITIAL_TOPICS: TopicSeed[] = [
     description:
       'Container fundamentals, Dockerfile best practices, multi-stage builds, Docker Compose, networking, and container orchestration.',
     icon: 'docker',
-    sortOrder: 8,
+    sortOrder: 9,
   },
   {
     name: 'SQL',
@@ -92,7 +101,7 @@ const INITIAL_TOPICS: TopicSeed[] = [
     description:
       'SQL querying, joins, indexing strategies, query optimization, transactions, normalization, and relational database design.',
     icon: 'sql',
-    sortOrder: 9,
+    sortOrder: 10,
   },
   {
     name: 'MySQL',
@@ -101,7 +110,7 @@ const INITIAL_TOPICS: TopicSeed[] = [
     description:
       'MySQL relational database: queries, joins, indexing, stored procedures, replication, and performance tuning.',
     icon: 'mysql',
-    sortOrder: 10,
+    sortOrder: 11,
   },
   {
     name: 'MongoDB',
@@ -110,7 +119,7 @@ const INITIAL_TOPICS: TopicSeed[] = [
     description:
       'MongoDB document database: CRUD operations, aggregation pipelines, indexing, schema design, replication, and sharding.',
     icon: 'mongodb',
-    sortOrder: 11,
+    sortOrder: 12,
   },
 ];
 
