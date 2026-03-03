@@ -531,12 +531,16 @@ export class DailyFlowService {
       newCount = 1;
     }
 
+    const currentMax = user.streak?.maxStreak ?? 0;
+    const newMax = Math.max(currentMax, newCount);
+
     await this.userModel
       .findOneAndUpdate(
         { _id: new Types.ObjectId(userId) },
         {
           $set: {
             'streak.count': newCount,
+            'streak.maxStreak': newMax,
             'streak.lastActiveDate': new Date(today),
           },
         },
@@ -548,6 +552,7 @@ export class DailyFlowService {
       userId,
       previousLastActiveDate: lastActiveDate,
       newStreak: newCount,
+      maxStreak: newMax,
       date: today,
     });
   }
@@ -556,20 +561,20 @@ export class DailyFlowService {
 
   /**
    * Runs at midnight daily. Resets streaks for users who have not been
-   * active in the last 2 days and still have a positive streak count.
+   * active since yesterday (1 missed day = streak reset).
    */
   @Cron('0 0 * * *')
   async resetStaleStreaks(): Promise<void> {
     this.logger.log({ msg: 'Starting stale streak reset' });
 
-    const twoDaysAgo = new Date();
-    twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
-    twoDaysAgo.setHours(0, 0, 0, 0);
+    const yesterdayStart = new Date();
+    yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+    yesterdayStart.setHours(0, 0, 0, 0);
 
     const result = await this.userModel
       .updateMany(
         {
-          'streak.lastActiveDate': { $lt: twoDaysAgo },
+          'streak.lastActiveDate': { $lt: yesterdayStart },
           'streak.count': { $gt: 0 },
         },
         {
