@@ -80,13 +80,15 @@ export class User {
   @Prop({
     type: {
       count: { type: Number, default: 0 },
+      maxStreak: { type: Number, default: 0 },
       lastActiveDate: { type: Date },
     },
-    default: { count: 0, lastActiveDate: null },
+    default: { count: 0, maxStreak: 0, lastActiveDate: null },
     _id: false,
   })
   streak: {
     count: number;
+    maxStreak: number;
     lastActiveDate: Date | null;
   };
 
