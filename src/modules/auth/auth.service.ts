@@ -10,17 +10,23 @@ import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import * as bcrypt from 'bcrypt';
+import { randomInt, createHash } from 'crypto';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
-import { User, UserDocument } from '../../database/schemas/user.schema.js';
+import { User, UserDocument, OtpType } from '../../database/schemas/user.schema.js';
 import { SignupDto } from './dto/signup.dto.js';
 import { LoginDto } from './dto/login.dto.js';
 import { AuthResponseDto } from './dto/auth-response.dto.js';
+import { VerifyEmailDto } from './dto/verify-email.dto.js';
+import { ForgotPasswordDto } from './dto/forgot-password.dto.js';
+import { ResetPasswordDto } from './dto/reset-password.dto.js';
+import { ResendOtpDto } from './dto/resend-otp.dto.js';
 import {
   ERROR_MESSAGES,
   SUBSCRIPTION_PLANS,
 } from '../../common/constants/index.js';
 import { JwtPayload } from './strategies/jwt.strategy.js';
+import { EmailService } from '../email/email.service.js';
 
 interface SafeUser {
   _id: unknown;
@@ -41,6 +47,7 @@ export class AuthService {
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly emailService: EmailService,
     @InjectPinoLogger(AuthService.name) private readonly logger: PinoLogger,
   ) {}
 
@@ -95,6 +102,21 @@ export class AuthService {
         subscribedTopics: dto.subscribedTopics || [],
       });
 
+      // Populate subscribed topics before converting to response
+      await user.populate({
+        path: 'subscribedTopics',
+        select: 'name slug icon',
+      });
+
+      // Generate and send email verification OTP
+      const otp = this.generateOtp();
+      await this.setOtpOnUser(
+        user._id.toString(),
+        otp,
+        OtpType.EMAIL_VERIFICATION,
+      );
+      await this.emailService.sendOtpEmail(user.email, otp, 'verification');
+
       // Generate tokens
       const tokens = await this.generateTokens(
         user._id.toString(),
@@ -104,7 +126,7 @@ export class AuthService {
 
       this.logger.info(
         { userId: user._id, email: user.email },
-        'Signup successful',
+        'Signup successful, verification email sent',
       );
 
       // Convert to plain object and remove password
@@ -172,6 +194,27 @@ export class AuthService {
       if (!isPasswordValid) {
         this.logger.warn({ email: dto.email, userId: user._id }, 'Login failed: invalid password');
         throw new UnauthorizedException(ERROR_MESSAGES.INVALID_CREDENTIALS);
+      }
+
+      // Populate subscribed topics before converting to response
+      await user.populate({
+        path: 'subscribedTopics',
+        select: 'name slug icon',
+      });
+
+      // If email not verified, send a fresh verification OTP
+      if (!user.isEmailVerified) {
+        const otp = this.generateOtp();
+        await this.setOtpOnUser(
+          user._id.toString(),
+          otp,
+          OtpType.EMAIL_VERIFICATION,
+        );
+        await this.emailService.sendOtpEmail(user.email, otp, 'verification');
+        this.logger.info(
+          { userId: user._id },
+          'Login: email not verified, verification OTP sent',
+        );
       }
 
       // Generate tokens
@@ -306,5 +349,211 @@ export class AuthService {
       this.logger.error({ err: error, userId }, 'User validation failed: unexpected error');
       return null;
     }
+  }
+
+  // ─────────────────────────── Verify Email ───────────────────────────────────
+
+  async verifyEmail(dto: VerifyEmailDto): Promise<{ message: string }> {
+    this.logger.info({ email: dto.email }, 'Email verification attempt');
+
+    const hashedOtp = this.hashOtp(dto.otp);
+
+    // Atomic: find user matching all conditions and update in one operation
+    // This prevents race conditions (double-verify, TOCTOU)
+    const result = await this.userModel
+      .findOneAndUpdate(
+        {
+          email: dto.email.toLowerCase(),
+          isEmailVerified: false,
+          otp: hashedOtp,
+          otpType: OtpType.EMAIL_VERIFICATION,
+          otpExpiry: { $gt: new Date() },
+        },
+        {
+          $set: { isEmailVerified: true },
+          $unset: { otp: 1, otpExpiry: 1, otpType: 1 },
+        },
+        { new: true },
+      )
+      .exec();
+
+    if (!result) {
+      // Determine the specific error for better UX
+      const user = await this.userModel
+        .findOne({ email: dto.email.toLowerCase() })
+        .select('+otp +otpExpiry +otpType')
+        .exec();
+
+      if (!user) {
+        throw new UnauthorizedException(ERROR_MESSAGES.INVALID_CREDENTIALS);
+      }
+      if (user.isEmailVerified) {
+        throw new BadRequestException(ERROR_MESSAGES.EMAIL_ALREADY_VERIFIED);
+      }
+      if (!user.otp || user.otpType !== OtpType.EMAIL_VERIFICATION) {
+        throw new BadRequestException(ERROR_MESSAGES.NO_PENDING_OTP);
+      }
+      if (user.otpExpiry && user.otpExpiry < new Date()) {
+        throw new BadRequestException(ERROR_MESSAGES.OTP_EXPIRED);
+      }
+      throw new BadRequestException(ERROR_MESSAGES.OTP_INVALID);
+    }
+
+    this.logger.info(
+      { userId: result._id, email: result.email },
+      'Email verified successfully',
+    );
+
+    return { message: 'Email verified successfully.' };
+  }
+
+  // ─────────────────────────── Forgot Password ────────────────────────────────
+
+  async forgotPassword(dto: ForgotPasswordDto): Promise<{ message: string }> {
+    this.logger.info({ email: dto.email }, 'Forgot password request');
+
+    const user = await this.userModel
+      .findOne({ email: dto.email.toLowerCase() })
+      .exec();
+
+    // Always return success to prevent email enumeration
+    if (!user) {
+      this.logger.warn(
+        { email: dto.email },
+        'Forgot password: email not found (silent)',
+      );
+      return {
+        message: 'If an account exists with this email, an OTP has been sent.',
+      };
+    }
+
+    const otp = this.generateOtp();
+    await this.setOtpOnUser(user._id.toString(), otp, OtpType.PASSWORD_RESET);
+    await this.emailService.sendOtpEmail(user.email, otp, 'reset');
+
+    this.logger.info(
+      { userId: user._id },
+      'Password reset OTP sent',
+    );
+
+    return {
+      message: 'If an account exists with this email, an OTP has been sent.',
+    };
+  }
+
+  // ─────────────────────────── Reset Password ─────────────────────────────────
+
+  async resetPassword(dto: ResetPasswordDto): Promise<{ message: string }> {
+    this.logger.info({ email: dto.email }, 'Password reset attempt');
+
+    const hashedOtp = this.hashOtp(dto.otp);
+    const hashedPassword = await bcrypt.hash(
+      dto.newPassword,
+      AuthService.BCRYPT_ROUNDS,
+    );
+
+    // Atomic: find user matching all conditions and update in one operation
+    const result = await this.userModel
+      .findOneAndUpdate(
+        {
+          email: dto.email.toLowerCase(),
+          otp: hashedOtp,
+          otpType: OtpType.PASSWORD_RESET,
+          otpExpiry: { $gt: new Date() },
+        },
+        {
+          $set: { password: hashedPassword },
+          $unset: { otp: 1, otpExpiry: 1, otpType: 1 },
+        },
+        { new: true },
+      )
+      .exec();
+
+    if (!result) {
+      // Determine the specific error for better UX
+      const user = await this.userModel
+        .findOne({ email: dto.email.toLowerCase() })
+        .select('+otp +otpExpiry +otpType')
+        .exec();
+
+      if (!user) {
+        throw new UnauthorizedException(ERROR_MESSAGES.INVALID_CREDENTIALS);
+      }
+      if (!user.otp || user.otpType !== OtpType.PASSWORD_RESET) {
+        throw new BadRequestException(ERROR_MESSAGES.NO_PENDING_OTP);
+      }
+      if (user.otpExpiry && user.otpExpiry < new Date()) {
+        throw new BadRequestException(ERROR_MESSAGES.OTP_EXPIRED);
+      }
+      throw new BadRequestException(ERROR_MESSAGES.OTP_INVALID);
+    }
+
+    this.logger.info(
+      { userId: result._id },
+      'Password reset successfully',
+    );
+
+    return {
+      message: 'Password reset successfully. Please log in with your new password.',
+    };
+  }
+
+  // ─────────────────────────── Resend OTP ─────────────────────────────────────
+
+  async resendOtp(dto: ResendOtpDto): Promise<{ message: string }> {
+    this.logger.info({ email: dto.email, type: dto.type }, 'Resend OTP request');
+
+    const user = await this.userModel
+      .findOne({ email: dto.email.toLowerCase() })
+      .exec();
+
+    if (!user) {
+      return { message: 'If an account exists, an OTP has been sent.' };
+    }
+
+    const otpType =
+      dto.type === 'email_verification'
+        ? OtpType.EMAIL_VERIFICATION
+        : OtpType.PASSWORD_RESET;
+    const emailType =
+      dto.type === 'email_verification' ? 'verification' : 'reset';
+
+    const otp = this.generateOtp();
+    await this.setOtpOnUser(user._id.toString(), otp, otpType);
+    await this.emailService.sendOtpEmail(user.email, otp, emailType);
+
+    this.logger.info(
+      { userId: user._id, type: dto.type },
+      'OTP resent successfully',
+    );
+
+    return { message: 'If an account exists, an OTP has been sent.' };
+  }
+
+  // ─────────────────────────── Private OTP Helpers ────────────────────────────
+
+  private generateOtp(): string {
+    return randomInt(100000, 999999).toString();
+  }
+
+  private hashOtp(otp: string): string {
+    return createHash('sha256').update(otp).digest('hex');
+  }
+
+  private async setOtpOnUser(
+    userId: string,
+    otp: string,
+    type: OtpType,
+  ): Promise<void> {
+    const hashedOtp = this.hashOtp(otp);
+    await this.userModel
+      .findByIdAndUpdate(userId, {
+        $set: {
+          otp: hashedOtp,
+          otpExpiry: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
+          otpType: type,
+        },
+      })
+      .exec();
   }
 }

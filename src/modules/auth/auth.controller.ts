@@ -18,6 +18,10 @@ import { AuthService } from './auth.service.js';
 import { SignupDto } from './dto/signup.dto.js';
 import { LoginDto } from './dto/login.dto.js';
 import { AuthResponseDto } from './dto/auth-response.dto.js';
+import { VerifyEmailDto } from './dto/verify-email.dto.js';
+import { ForgotPasswordDto } from './dto/forgot-password.dto.js';
+import { ResetPasswordDto } from './dto/reset-password.dto.js';
+import { ResendOtpDto } from './dto/resend-otp.dto.js';
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
 import { CurrentUser } from './decorators/current-user.decorator.js';
 
@@ -113,5 +117,55 @@ export class AuthController {
     @CurrentUser('_id') userId: string,
   ): Promise<{ accessToken: string; refreshToken: string }> {
     return this.authService.refreshToken(userId.toString());
+  }
+
+  // ──────────────────────────── Verify Email ──────────────────────────────────
+
+  @Post('verify-email')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Verify email with OTP code' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Email verified' })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid or expired OTP' })
+  async verifyEmail(@Body() dto: VerifyEmailDto): Promise<{ message: string }> {
+    return this.authService.verifyEmail(dto);
+  }
+
+  // ──────────────────────────── Forgot Password ───────────────────────────────
+
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Request password reset OTP' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'OTP sent if account exists' })
+  async forgotPassword(
+    @Body() dto: ForgotPasswordDto,
+  ): Promise<{ message: string }> {
+    return this.authService.forgotPassword(dto);
+  }
+
+  // ──────────────────────────── Reset Password ────────────────────────────────
+
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Reset password with OTP code' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Password reset successfully' })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid or expired OTP' })
+  async resetPassword(
+    @Body() dto: ResetPasswordDto,
+  ): Promise<{ message: string }> {
+    return this.authService.resetPassword(dto);
+  }
+
+  // ─────────────────────────── Resend OTP ─────────────────────────────────────
+
+  @Post('resend-otp')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 2, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Resend OTP for email verification or password reset' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'OTP resent if account exists' })
+  async resendOtp(@Body() dto: ResendOtpDto): Promise<{ message: string }> {
+    return this.authService.resendOtp(dto);
   }
 }

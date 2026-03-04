@@ -15,6 +15,7 @@ import {
   openaiConfig,
   fcmConfig,
   razorpayConfig,
+  emailConfig,
 } from './common/config/index.js';
 import { HEADERS } from './common/constants/index.js';
 import { HealthController } from './common/health/health.controller.js';
@@ -27,13 +28,14 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { DailyFlowModule } from './modules/daily-flow/daily-flow.module.js';
 import { PaymentsModule } from './modules/payments/payments.module.js';
 import { ProgressModule } from './modules/progress/progress.module.js';
+import { EmailModule } from './modules/email/email.module.js';
 
 @Module({
   imports: [
     // ─── Configuration ──────────────────────────────────────────
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, databaseConfig, jwtConfig, openaiConfig, fcmConfig, razorpayConfig],
+      load: [appConfig, databaseConfig, jwtConfig, openaiConfig, fcmConfig, razorpayConfig, emailConfig],
       validationSchema,
       validationOptions: {
         abortEarly: false,
@@ -112,6 +114,7 @@ import { ProgressModule } from './modules/progress/progress.module.js';
     ScheduleModule.forRoot(),
 
     // ─── Feature Modules ──────────────────────────────────────────
+    EmailModule,
     AuthModule,
     UsersModule,
     TopicsModule,

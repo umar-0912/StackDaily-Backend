@@ -41,6 +41,13 @@ export const ERROR_MESSAGES = {
   SUBSCRIPTION_DOWNGRADE_REDUCE:
     'You have more topics than your current plan allows. Please reduce your subscriptions before adding new ones.',
 
+  // OTP / Email
+  EMAIL_NOT_VERIFIED: 'Please verify your email before continuing.',
+  OTP_EXPIRED: 'OTP has expired. Please request a new one.',
+  OTP_INVALID: 'Invalid OTP.',
+  EMAIL_ALREADY_VERIFIED: 'Email is already verified.',
+  NO_PENDING_OTP: 'No pending verification. Please request a new OTP.',
+
   // Payments
   PAYMENT_ALREADY_PRO: 'You already have an active Pro subscription.',
   PAYMENT_SUBSCRIPTION_CREATION_FAILED:

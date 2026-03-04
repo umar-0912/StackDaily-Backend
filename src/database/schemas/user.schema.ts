@@ -19,12 +19,20 @@ export enum SubscriptionStatus {
   EXPIRED = 'expired',
 }
 
+export enum OtpType {
+  EMAIL_VERIFICATION = 'email_verification',
+  PASSWORD_RESET = 'password_reset',
+}
+
 @Schema({
   timestamps: true,
   toJSON: {
     virtuals: true,
     transform(_doc, ret: Record<string, unknown>) {
       delete ret['password'];
+      delete ret['otp'];
+      delete ret['otpExpiry'];
+      delete ret['otpType'];
       delete ret['__v'];
       return ret;
     },
@@ -104,6 +112,18 @@ export class User {
     default: true,
   })
   isActive: boolean;
+
+  @Prop({ type: Boolean, default: false })
+  isEmailVerified: boolean;
+
+  @Prop({ type: String, select: false })
+  otp?: string;
+
+  @Prop({ type: Date, select: false })
+  otpExpiry?: Date;
+
+  @Prop({ type: String, enum: OtpType, select: false })
+  otpType?: OtpType;
 
   @Prop({
     type: {

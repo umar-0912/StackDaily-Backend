@@ -6,4 +6,5 @@ export {
   openaiConfig,
   fcmConfig,
   razorpayConfig,
+  emailConfig,
 } from './app.config.js';
