@@ -13,4 +13,10 @@ export class SubscribeResponseDto {
     example: 'sub_xxxxxxxxxxxxx',
   })
   subscriptionId: string;
+
+  @ApiProperty({
+    description: 'Razorpay key ID (public key for client-side SDK)',
+    example: 'rzp_test_xxxxxxxxxxxxx',
+  })
+  razorpayKeyId: string;
 }

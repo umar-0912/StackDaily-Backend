@@ -36,7 +36,7 @@ export class PaymentsService {
    */
   async createSubscription(
     userId: string,
-  ): Promise<{ shortUrl: string; subscriptionId: string }> {
+  ): Promise<{ shortUrl: string; subscriptionId: string; razorpayKeyId: string }> {
     this.logger.info({ userId }, 'Creating subscription');
 
     const user = await this.userModel.findById(userId).lean().exec();
@@ -88,6 +88,7 @@ export class PaymentsService {
       return {
         shortUrl: subscription.short_url,
         subscriptionId: subscription.id,
+        razorpayKeyId: this.configService.get<string>('razorpay.keyId')!,
       };
     } catch (error) {
       // Re-throw known exceptions
