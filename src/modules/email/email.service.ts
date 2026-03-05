@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import * as nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
+import type SMTPTransport from 'nodemailer/lib/smtp-transport';
 
 @Injectable()
 export class EmailService {
@@ -19,12 +20,16 @@ export class EmailService {
     const pass = this.configService.get<string>('email.pass');
 
     if (user && pass) {
-      this.transporter = nodemailer.createTransport({
+      const smtpOptions: SMTPTransport.Options & { family?: number } = {
         host: this.configService.get<string>('email.host'),
         port: this.configService.get<number>('email.port'),
         secure: false,
         auth: { user, pass },
-      });
+        family: 4, // Force IPv4 — Railway doesn't support IPv6 outbound
+      };
+      this.transporter = nodemailer.createTransport(
+        smtpOptions as SMTPTransport.Options,
+      );
       this.logger.info('Email transporter initialized');
     } else {
       this.logger.warn(
