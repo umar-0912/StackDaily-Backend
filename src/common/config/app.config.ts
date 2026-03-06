@@ -37,12 +37,9 @@ export const validationSchema = Joi.object({
   RAZORPAY_WEBHOOK_SECRET: Joi.string().optional().default(''),
   RAZORPAY_PLAN_ID: Joi.string().optional().default(''),
 
-  // Email / SMTP (optional — email features disabled without it)
-  SMTP_HOST: Joi.string().optional().default('smtp.gmail.com'),
-  SMTP_PORT: Joi.number().optional().default(587),
-  SMTP_USER: Joi.string().optional().allow('').default(''),
-  SMTP_PASS: Joi.string().optional().allow('').default(''),
-  SMTP_FROM: Joi.string().optional().allow('').default(''),
+  // Email — Resend (optional — email features disabled without it)
+  RESEND_API_KEY: Joi.string().optional().allow('').default(''),
+  EMAIL_FROM: Joi.string().optional().allow('').default('StackDaily <onboarding@resend.dev>'),
 });
 
 export const appConfig = registerAs('app', () => ({
@@ -78,9 +75,6 @@ export const razorpayConfig = registerAs('razorpay', () => ({
 }));
 
 export const emailConfig = registerAs('email', () => ({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: parseInt(process.env.SMTP_PORT || '587', 10),
-  user: process.env.SMTP_USER || '',
-  pass: process.env.SMTP_PASS || '',
-  from: process.env.SMTP_FROM || process.env.SMTP_USER || '',
+  resendApiKey: process.env.RESEND_API_KEY || '',
+  from: process.env.EMAIL_FROM || 'StackDaily <onboarding@resend.dev>',
 }));

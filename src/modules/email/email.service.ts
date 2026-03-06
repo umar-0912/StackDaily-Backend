@@ -1,17 +1,12 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
-import * as nodemailer from 'nodemailer';
-import type { Transporter } from 'nodemailer';
-import type SMTPTransport from 'nodemailer/lib/smtp-transport';
-import { setDefaultResultOrder } from 'node:dns';
-
-// Force IPv4 DNS resolution — Railway doesn't support IPv6 outbound
-setDefaultResultOrder('ipv4first');
+import { Resend } from 'resend';
 
 @Injectable()
 export class EmailService {
-  private transporter: Transporter | null = null;
+  private resend: Resend | null = null;
+  private readonly from: string;
   private readonly isProduction: boolean;
 
   constructor(
@@ -20,25 +15,15 @@ export class EmailService {
   ) {
     this.isProduction =
       this.configService.get<string>('app.nodeEnv') === 'production';
-    const user = this.configService.get<string>('email.user');
-    const pass = this.configService.get<string>('email.pass');
+    this.from = this.configService.get<string>('email.from')!;
+    const apiKey = this.configService.get<string>('email.resendApiKey');
 
-    if (user && pass) {
-      const port = this.configService.get<number>('email.port');
-      const smtpOptions: SMTPTransport.Options & { family?: number } = {
-        host: this.configService.get<string>('email.host'),
-        port,
-        secure: port === 465, // SSL on 465, STARTTLS on 587
-        auth: { user, pass },
-        family: 4,
-      };
-      this.transporter = nodemailer.createTransport(
-        smtpOptions as SMTPTransport.Options,
-      );
-      this.logger.info('Email transporter initialized');
+    if (apiKey) {
+      this.resend = new Resend(apiKey);
+      this.logger.info('Resend email client initialized');
     } else {
       this.logger.warn(
-        'SMTP credentials not configured — email sending disabled',
+        'RESEND_API_KEY not configured — email sending disabled',
       );
     }
   }
@@ -56,17 +41,17 @@ export class EmailService {
     otp: string,
     type: 'verification' | 'reset',
   ): Promise<void> {
-    if (!this.transporter) {
+    if (!this.resend) {
       if (this.isProduction) {
         this.logger.error(
           { to, type },
-          'Email send failed — no transporter configured in production',
+          'Email send failed — Resend not configured in production',
         );
         throw new InternalServerErrorException(
           'Email service is not configured. Please contact support.',
         );
       }
-      this.logger.warn({ to, type }, 'Email send skipped — no transporter (dev mode)');
+      this.logger.warn({ to, type }, 'Email send skipped — no Resend client (dev mode)');
       return;
     }
 
@@ -89,11 +74,20 @@ export class EmailService {
       </div>
     `;
 
-    const from = this.configService.get<string>('email.from');
-
     try {
-      await this.transporter.sendMail({ from, to, subject, html });
-      this.logger.info({ to, type }, 'OTP email sent');
+      const { error } = await this.resend.emails.send({
+        from: this.from,
+        to,
+        subject,
+        html,
+      });
+
+      if (error) {
+        this.logger.error({ err: error, to, type }, 'Resend API returned error');
+        throw new Error(error.message);
+      }
+
+      this.logger.info({ to, type }, 'OTP email sent via Resend');
     } catch (error) {
       this.logger.error({ err: error, to, type }, 'Failed to send OTP email');
       throw error;
