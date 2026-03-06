@@ -115,7 +115,10 @@ export class AuthService {
         otp,
         OtpType.EMAIL_VERIFICATION,
       );
-      await this.emailService.sendOtpEmail(user.email, otp, 'verification');
+      // Fire-and-forget: send email in background to avoid blocking the response
+      this.emailService.sendOtpEmail(user.email, otp, 'verification').catch((err) => {
+        this.logger.error({ err, userId: user._id, email: user.email }, 'Failed to send verification OTP email');
+      });
 
       // Generate tokens
       const tokens = await this.generateTokens(
@@ -126,7 +129,7 @@ export class AuthService {
 
       this.logger.info(
         { userId: user._id, email: user.email },
-        'Signup successful, verification email sent',
+        'Signup successful, verification email queued',
       );
 
       // Convert to plain object and remove password
@@ -210,10 +213,12 @@ export class AuthService {
           otp,
           OtpType.EMAIL_VERIFICATION,
         );
-        await this.emailService.sendOtpEmail(user.email, otp, 'verification');
+        this.emailService.sendOtpEmail(user.email, otp, 'verification').catch((err) => {
+          this.logger.error({ err, userId: user._id }, 'Failed to send verification OTP email on login');
+        });
         this.logger.info(
           { userId: user._id },
-          'Login: email not verified, verification OTP sent',
+          'Login: email not verified, verification OTP queued',
         );
       }
 
@@ -429,11 +434,13 @@ export class AuthService {
 
     const otp = this.generateOtp();
     await this.setOtpOnUser(user._id.toString(), otp, OtpType.PASSWORD_RESET);
-    await this.emailService.sendOtpEmail(user.email, otp, 'reset');
+    this.emailService.sendOtpEmail(user.email, otp, 'reset').catch((err) => {
+      this.logger.error({ err, userId: user._id }, 'Failed to send password reset OTP email');
+    });
 
     this.logger.info(
       { userId: user._id },
-      'Password reset OTP sent',
+      'Password reset OTP queued',
     );
 
     return {
@@ -520,11 +527,13 @@ export class AuthService {
 
     const otp = this.generateOtp();
     await this.setOtpOnUser(user._id.toString(), otp, otpType);
-    await this.emailService.sendOtpEmail(user.email, otp, emailType);
+    this.emailService.sendOtpEmail(user.email, otp, emailType).catch((err) => {
+      this.logger.error({ err, userId: user._id, type: dto.type }, 'Failed to resend OTP email');
+    });
 
     this.logger.info(
       { userId: user._id, type: dto.type },
-      'OTP resent successfully',
+      'OTP resend queued',
     );
 
     return { message: 'If an account exists, an OTP has been sent.' };

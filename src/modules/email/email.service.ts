@@ -4,6 +4,10 @@ import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import * as nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
 import type SMTPTransport from 'nodemailer/lib/smtp-transport';
+import { setDefaultResultOrder } from 'node:dns';
+
+// Force IPv4 DNS resolution — Railway doesn't support IPv6 outbound
+setDefaultResultOrder('ipv4first');
 
 @Injectable()
 export class EmailService {
