@@ -24,12 +24,13 @@ export class EmailService {
     const pass = this.configService.get<string>('email.pass');
 
     if (user && pass) {
+      const port = this.configService.get<number>('email.port');
       const smtpOptions: SMTPTransport.Options & { family?: number } = {
         host: this.configService.get<string>('email.host'),
-        port: this.configService.get<number>('email.port'),
-        secure: false,
+        port,
+        secure: port === 465, // SSL on 465, STARTTLS on 587
         auth: { user, pass },
-        family: 4, // Force IPv4 — Railway doesn't support IPv6 outbound
+        family: 4,
       };
       this.transporter = nodemailer.createTransport(
         smtpOptions as SMTPTransport.Options,
