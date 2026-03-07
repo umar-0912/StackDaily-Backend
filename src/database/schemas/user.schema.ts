@@ -24,12 +24,18 @@ export enum OtpType {
   PASSWORD_RESET = 'password_reset',
 }
 
+export enum AuthProvider {
+  LOCAL = 'local',
+  GOOGLE = 'google',
+}
+
 @Schema({
   timestamps: true,
   toJSON: {
     virtuals: true,
     transform(_doc, ret: Record<string, unknown>) {
       delete ret['password'];
+      delete ret['googleId'];
       delete ret['otp'];
       delete ret['otpExpiry'];
       delete ret['otpType'];
@@ -64,10 +70,25 @@ export class User {
 
   @Prop({
     type: String,
-    required: true,
+    required: false,
     select: false,
   })
-  password: string;
+  password?: string;
+
+  @Prop({
+    type: String,
+    default: null,
+    sparse: true,
+    index: true,
+  })
+  googleId?: string | null;
+
+  @Prop({
+    type: String,
+    enum: AuthProvider,
+    default: AuthProvider.LOCAL,
+  })
+  authProvider: AuthProvider;
 
   @Prop({
     type: [{ type: Types.ObjectId, ref: 'Topic' }],
@@ -172,3 +193,6 @@ UserSchema.index({ isActive: 1, subscribedTopics: 1 });
 
 // Index for querying users by subscription plan (admin dashboard, stats)
 UserSchema.index({ 'subscription.plan': 1 });
+
+// Sparse unique index for Google Sign-In users
+UserSchema.index({ googleId: 1 }, { unique: true, sparse: true });

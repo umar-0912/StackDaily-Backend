@@ -12,8 +12,9 @@ import { Model } from 'mongoose';
 import * as bcrypt from 'bcrypt';
 import { randomInt, createHash } from 'crypto';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
+import { OAuth2Client } from 'google-auth-library';
 
-import { User, UserDocument, OtpType } from '../../database/schemas/user.schema.js';
+import { User, UserDocument, OtpType, AuthProvider } from '../../database/schemas/user.schema.js';
 import { SignupDto } from './dto/signup.dto.js';
 import { LoginDto } from './dto/login.dto.js';
 import { AuthResponseDto } from './dto/auth-response.dto.js';
@@ -21,6 +22,7 @@ import { VerifyEmailDto } from './dto/verify-email.dto.js';
 import { ForgotPasswordDto } from './dto/forgot-password.dto.js';
 import { ResetPasswordDto } from './dto/reset-password.dto.js';
 import { ResendOtpDto } from './dto/resend-otp.dto.js';
+import { GoogleSignInDto } from './dto/google-signin.dto.js';
 import {
   ERROR_MESSAGES,
   SUBSCRIPTION_PLANS,
@@ -42,6 +44,8 @@ interface SafeUser {
 @Injectable()
 export class AuthService {
   private static readonly BCRYPT_ROUNDS = 12;
+  private readonly googleClient: OAuth2Client;
+  private readonly googleClientId: string;
 
   constructor(
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
@@ -49,7 +53,10 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly emailService: EmailService,
     @InjectPinoLogger(AuthService.name) private readonly logger: PinoLogger,
-  ) {}
+  ) {
+    this.googleClientId = this.configService.get<string>('google.clientId', '');
+    this.googleClient = new OAuth2Client(this.googleClientId);
+  }
 
   // ─────────────────────────────── Signup ───────────────────────────────────
 
@@ -189,6 +196,15 @@ export class AuthService {
           'Login failed: account inactive',
         );
         throw new UnauthorizedException('Account is deactivated. Please contact support.');
+      }
+
+      // Google-only users have no password — reject email+password login
+      if (!user.password) {
+        this.logger.warn(
+          { email: dto.email, userId: user._id },
+          'Login failed: no password set (Google-only account)',
+        );
+        throw new UnauthorizedException(ERROR_MESSAGES.INVALID_CREDENTIALS);
       }
 
       // Verify password
@@ -539,6 +555,143 @@ export class AuthService {
     return { message: 'If an account exists, an OTP has been sent.' };
   }
 
+  // ─────────────────────────── Google Sign-In ─────────────────────────────────
+
+  async googleSignIn(dto: GoogleSignInDto): Promise<AuthResponseDto> {
+    this.logger.info('Google Sign-In attempt');
+
+    if (!this.googleClientId) {
+      this.logger.error('Google Sign-In failed: GOOGLE_CLIENT_ID not configured');
+      throw new InternalServerErrorException(
+        'Google Sign-In is not configured. Please contact support.',
+      );
+    }
+
+    // 1. Verify Google ID token
+    let payload: {
+      sub: string;
+      email: string;
+      name?: string;
+      email_verified?: boolean;
+    };
+
+    try {
+      const ticket = await this.googleClient.verifyIdToken({
+        idToken: dto.idToken,
+        audience: this.googleClientId,
+      });
+      const ticketPayload = ticket.getPayload();
+
+      if (!ticketPayload || !ticketPayload.email || !ticketPayload.sub) {
+        throw new Error('Missing required fields in Google token payload');
+      }
+
+      payload = {
+        sub: ticketPayload.sub,
+        email: ticketPayload.email,
+        name: ticketPayload.name,
+        email_verified: ticketPayload.email_verified,
+      };
+    } catch (error) {
+      this.logger.warn(
+        { err: error },
+        'Google Sign-In failed: invalid ID token',
+      );
+      throw new UnauthorizedException('Invalid Google ID token.');
+    }
+
+    // 2. Find existing user by googleId (returning Google user)
+    let user = await this.userModel
+      .findOne({ googleId: payload.sub })
+      .populate({ path: 'subscribedTopics', select: 'name slug icon' })
+      .exec();
+
+    if (user) {
+      this.logger.info(
+        { userId: user._id, email: user.email },
+        'Google Sign-In: returning user',
+      );
+      const tokens = await this.generateTokens(
+        user._id.toString(),
+        user.email,
+        user.role,
+      );
+      const userObj = user.toObject();
+      const { password: _password, ...userWithoutPassword } = userObj;
+      return {
+        ...tokens,
+        user: userWithoutPassword as unknown as AuthResponseDto['user'],
+      };
+    }
+
+    // 3. Find existing user by email (account linking)
+    user = await this.userModel
+      .findOne({ email: payload.email.toLowerCase() })
+      .populate({ path: 'subscribedTopics', select: 'name slug icon' })
+      .exec();
+
+    if (user) {
+      // Link Google account to existing email+password user
+      user.googleId = payload.sub;
+      user.isEmailVerified = true; // Google verifies email
+      await user.save();
+
+      this.logger.info(
+        { userId: user._id, email: user.email },
+        'Google Sign-In: linked Google account to existing user',
+      );
+
+      const tokens = await this.generateTokens(
+        user._id.toString(),
+        user.email,
+        user.role,
+      );
+      const userObj = user.toObject();
+      const { password: _password, ...userWithoutPassword } = userObj;
+      return {
+        ...tokens,
+        user: userWithoutPassword as unknown as AuthResponseDto['user'],
+      };
+    }
+
+    // 4. Create new user (Google-only, no password, auto-verified)
+    const username = await this.generateUniqueUsername(
+      payload.name,
+      payload.email,
+    );
+
+    const newUser = await this.userModel.create({
+      email: payload.email.toLowerCase(),
+      username,
+      googleId: payload.sub,
+      authProvider: AuthProvider.GOOGLE,
+      isEmailVerified: true, // Google verifies email
+    });
+
+    await newUser.populate({
+      path: 'subscribedTopics',
+      select: 'name slug icon',
+    });
+
+    const tokens = await this.generateTokens(
+      newUser._id.toString(),
+      newUser.email,
+      newUser.role,
+    );
+
+    this.logger.info(
+      { userId: newUser._id, email: newUser.email, username },
+      'Google Sign-In: new user created',
+    );
+
+    const userObj = newUser.toObject();
+    const { password: _password, ...userWithoutPassword } = userObj;
+    return {
+      ...tokens,
+      user: userWithoutPassword as unknown as AuthResponseDto['user'],
+    };
+  }
+
   // ─────────────────────────── Private OTP Helpers ────────────────────────────
 
   private generateOtp(): string {
@@ -564,5 +717,40 @@ export class AuthService {
         },
       })
       .exec();
+  }
+
+  // ──────────────────────── Private Google Helpers ─────────────────────────
+
+  /**
+   * Generates a unique username from Google display name or email prefix.
+   * Appends random digits if the base name is already taken.
+   */
+  private async generateUniqueUsername(
+    displayName?: string,
+    email?: string,
+  ): Promise<string> {
+    // Extract base: "John Doe" → "johndoe", or "user@gmail.com" → "user"
+    const raw = displayName
+      ? displayName.replace(/\s+/g, '').toLowerCase()
+      : (email?.split('@')[0] ?? 'user').toLowerCase();
+
+    // Keep only alphanumeric, truncate to 20 chars
+    const base = raw.replace(/[^a-z0-9]/g, '').slice(0, 20) || 'user';
+
+    // Check if base username is available
+    const exists = await this.userModel.exists({ username: base }).exec();
+    if (!exists) return base;
+
+    // Append random digits until unique (max 10 attempts, then fallback)
+    for (let i = 0; i < 10; i++) {
+      const candidate = `${base}${randomInt(100, 9999)}`;
+      const taken = await this.userModel
+        .exists({ username: candidate })
+        .exec();
+      if (!taken) return candidate;
+    }
+
+    // Ultimate fallback: base + timestamp
+    return `${base}${Date.now().toString(36)}`;
   }
 }

@@ -16,6 +16,7 @@ import {
   fcmConfig,
   razorpayConfig,
   emailConfig,
+  googleConfig,
 } from './common/config/index.js';
 import { HEADERS } from './common/constants/index.js';
 import { HealthController } from './common/health/health.controller.js';
@@ -35,7 +36,7 @@ import { EmailModule } from './modules/email/email.module.js';
     // ─── Configuration ──────────────────────────────────────────
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, databaseConfig, jwtConfig, openaiConfig, fcmConfig, razorpayConfig, emailConfig],
+      load: [appConfig, databaseConfig, jwtConfig, openaiConfig, fcmConfig, razorpayConfig, emailConfig, googleConfig],
       validationSchema,
       validationOptions: {
         abortEarly: false,

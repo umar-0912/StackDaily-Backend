@@ -7,4 +7,5 @@ export {
   fcmConfig,
   razorpayConfig,
   emailConfig,
+  googleConfig,
 } from './app.config.js';

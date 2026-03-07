@@ -40,6 +40,9 @@ export const validationSchema = Joi.object({
   // Email — Resend (optional — email features disabled without it)
   RESEND_API_KEY: Joi.string().optional().allow('').default(''),
   EMAIL_FROM: Joi.string().optional().allow('').default('StackDaily <onboarding@resend.dev>'),
+
+  // Google Sign-In (optional — Google auth disabled without it)
+  GOOGLE_CLIENT_ID: Joi.string().optional().allow('').default(''),
 });
 
 export const appConfig = registerAs('app', () => ({
@@ -77,4 +80,8 @@ export const razorpayConfig = registerAs('razorpay', () => ({
 export const emailConfig = registerAs('email', () => ({
   resendApiKey: process.env.RESEND_API_KEY || '',
   from: process.env.EMAIL_FROM || 'StackDaily <onboarding@resend.dev>',
+}));
+
+export const googleConfig = registerAs('google', () => ({
+  clientId: process.env.GOOGLE_CLIENT_ID || '',
 }));

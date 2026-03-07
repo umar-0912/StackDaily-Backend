@@ -22,6 +22,7 @@ import { VerifyEmailDto } from './dto/verify-email.dto.js';
 import { ForgotPasswordDto } from './dto/forgot-password.dto.js';
 import { ResetPasswordDto } from './dto/reset-password.dto.js';
 import { ResendOtpDto } from './dto/resend-otp.dto.js';
+import { GoogleSignInDto } from './dto/google-signin.dto.js';
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
 import { CurrentUser } from './decorators/current-user.decorator.js';
 
@@ -167,5 +168,28 @@ export class AuthController {
   @ApiResponse({ status: HttpStatus.OK, description: 'OTP resent if account exists' })
   async resendOtp(@Body() dto: ResendOtpDto): Promise<{ message: string }> {
     return this.authService.resendOtp(dto);
+  }
+
+  // ─────────────────────────── Google Sign-In ─────────────────────────────────
+
+  @Post('google')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Sign in or register with Google',
+    description:
+      'Authenticates a user using a Google ID token. If the user does not exist, a new account is created automatically. If an email+password account exists with the same email, the Google account is linked. Returns JWT access and refresh tokens.',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Google Sign-In successful',
+    type: AuthResponseDto,
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'Invalid Google ID token',
+  })
+  async googleSignIn(@Body() dto: GoogleSignInDto): Promise<AuthResponseDto> {
+    return this.authService.googleSignIn(dto);
   }
 }
