@@ -35,10 +35,10 @@ export class NotificationLog {
   @Prop({
     type: Types.ObjectId,
     ref: 'DailySelection',
-    required: true,
+    required: false,
     index: true,
   })
-  dailySelectionId: Types.ObjectId;
+  dailySelectionId?: Types.ObjectId;
 
   @Prop({
     type: String,

@@ -33,6 +33,7 @@ import { EmailService } from '../email/email.service.js';
 interface SafeUser {
   _id: unknown;
   email: string;
+  name: string;
   username: string;
   role: string;
   isActive: boolean;
@@ -61,29 +62,21 @@ export class AuthService {
   // ─────────────────────────────── Signup ───────────────────────────────────
 
   async signup(dto: SignupDto): Promise<AuthResponseDto> {
-    this.logger.info({ email: dto.email, username: dto.username }, 'Signup attempt');
+    this.logger.info({ email: dto.email, name: dto.name }, 'Signup attempt');
 
     try {
       // Check for existing user by email
       const existingUser = await this.userModel
-        .findOne({
-          $or: [{ email: dto.email.toLowerCase() }, { username: dto.username.toLowerCase() }],
-        })
+        .findOne({ email: dto.email.toLowerCase() })
         .lean()
         .exec();
 
       if (existingUser) {
-        const field =
-          existingUser.email === dto.email.toLowerCase() ? 'email' : 'username';
         this.logger.warn(
-          { email: dto.email, username: dto.username, conflictField: field },
-          'Signup failed: duplicate user',
+          { email: dto.email },
+          'Signup failed: duplicate email',
         );
-        throw new ConflictException(
-          field === 'email'
-            ? ERROR_MESSAGES.EMAIL_ALREADY_EXISTS
-            : `An account with this username already exists.`,
-        );
+        throw new ConflictException(ERROR_MESSAGES.EMAIL_ALREADY_EXISTS);
       }
 
       // Enforce free tier topic limit during signup
@@ -101,10 +94,14 @@ export class AuthService {
       // Hash the password
       const hashedPassword = await bcrypt.hash(dto.password, AuthService.BCRYPT_ROUNDS);
 
+      // Auto-generate unique username from name
+      const username = await this.generateUniqueUsername(dto.name, dto.email);
+
       // Create the user (subscription defaults to free/active via schema)
       const user = await this.userModel.create({
         email: dto.email.toLowerCase(),
-        username: dto.username.toLowerCase(),
+        name: dto.name.trim(),
+        username,
         password: hashedPassword,
         subscribedTopics: dto.subscribedTopics || [],
       });
@@ -655,6 +652,7 @@ export class AuthService {
     }
 
     // 4. Create new user (Google-only, no password, auto-verified)
+    const googleName = payload.name || payload.email.split('@')[0];
     const username = await this.generateUniqueUsername(
       payload.name,
       payload.email,
@@ -662,6 +660,7 @@ export class AuthService {
 
     const newUser = await this.userModel.create({
       email: payload.email.toLowerCase(),
+      name: googleName,
       username,
       googleId: payload.sub,
       authProvider: AuthProvider.GOOGLE,

@@ -82,20 +82,20 @@ export class DailyFlowService {
   // ──────────────────────── Daily Flow Cron ─────────────────────────────────
 
   /**
-   * Main daily flow orchestration. Runs at 5 AM every day.
+   * Main daily flow orchestration. Runs at 8 PM every day.
    *
    * Steps:
    * 1. Fetch all active topics
    * 2. Select a question for each topic (least recently used) for admin stats
    * 3. Verify AI answers exist for selected questions
    * 4. Create DailySelection records (idempotent via upsert)
-   * 5. Send generic push notifications to subscribed users
+   * 5. Send ONE personalized push notification per user (all topics done first)
    * 6. Log summary
    *
    * Note: The personalized question per user is computed on-demand in getDailyFeed().
-   * The cron job uses generic notifications to avoid per-user DB queries.
+   * Notifications are sent once per user (not per topic) with `{name}` placeholder.
    */
-  @Cron('0 5 * * *')
+  @Cron('0 20 * * *')
   async runDailyFlow(): Promise<void> {
     const startTime = Date.now();
     const today = this.getTodayDate();
@@ -220,73 +220,17 @@ export class DailyFlowService {
             },
           ]);
 
-          // Retrieve the daily selection (whether just created or already existed)
-          const dailySelection = await this.dailySelectionModel
-            .findOne({ date: today, topicId })
-            .lean()
-            .exec();
-
-          if (!dailySelection) {
-            this.logger.error({
-              msg: 'Failed to retrieve daily selection after upsert',
-              date: today,
-              topicId: topicId.toString(),
-            });
-            summary.errors++;
-            continue;
-          }
-
-          const dailySelectionId = (dailySelection as any)._id as Types.ObjectId;
-
           this.logger.log({
             msg: 'DailySelection record ensured',
-            dailySelectionId: dailySelectionId.toString(),
             date: today,
             topicId: topicId.toString(),
           });
 
-          // ── Step 5: Send generic notifications ─────────────────────────
-          const payload = {
-            title: `Daily ${topic.name} Question`,
-            body: 'Your next question is ready! Open the app to continue learning.',
-            data: {
-              topicId: topicId.toString(),
-            },
-          };
-
-          let topicNotificationsSent = 0;
-
-          try {
-            const sendResult = await this.notificationsService.sendDailyNotifications(
-              topicId.toString(),
-              dailySelectionId.toString(),
-              payload,
-            );
-            topicNotificationsSent = sendResult.sent;
-          } catch (notificationError: any) {
-            this.logger.error({
-              msg: 'Failed to send notifications for topic',
-              topicName: topic.name,
-              error: notificationError.message,
-            });
-            summary.errors++;
-          }
-
-          // Update the notificationsSent count on the daily selection
-          await this.dailySelectionModel
-            .updateOne(
-              { _id: dailySelectionId },
-              { $inc: { notificationsSent: topicNotificationsSent } },
-            )
-            .exec();
-
-          summary.notificationsSent += topicNotificationsSent;
           summary.topicsProcessed++;
 
           this.logger.log({
             msg: 'Topic processing complete',
             topicName: topic.name,
-            notificationsSent: topicNotificationsSent,
           });
         } catch (topicError: any) {
           this.logger.error({
@@ -298,6 +242,24 @@ export class DailyFlowService {
           });
           summary.errors++;
         }
+      }
+
+      // ── Step 5: Send ONE personalized notification per user ────────────
+      try {
+        const payload = {
+          title: '🔥 StackDaily',
+          body: 'Hey {name}, your daily question is ready! Keep the streak going 🚀',
+        };
+
+        const sendResult =
+          await this.notificationsService.sendDailyNotificationsToAll(payload);
+        summary.notificationsSent = sendResult.sent;
+      } catch (notificationError: any) {
+        this.logger.error({
+          msg: 'Failed to send daily notifications',
+          error: notificationError.message,
+        });
+        summary.errors++;
       }
 
       // ── Step 6: Log summary ────────────────────────────────────────────

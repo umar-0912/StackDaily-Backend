@@ -329,8 +329,11 @@ export class NotificationsService implements OnModuleInit {
   // ─── Send daily notifications ──────────────────────────────────────
 
   /**
-   * Send daily notifications to all active users subscribed to a topic
-   * who have a valid FCM token.
+   * Send personalized daily notifications to all active users subscribed
+   * to a topic who have a valid FCM token.
+   *
+   * Uses `{name}` placeholder in `payload.body` — replaced with the user's
+   * first name at send time. Falls back to "there" when name is missing.
    */
   async sendDailyNotifications(
     topicId: string,
@@ -350,7 +353,7 @@ export class NotificationsService implements OnModuleInit {
         fcmToken: { $ne: null, $exists: true },
       })
       .lean()
-      .select('_id fcmToken')
+      .select('_id fcmToken name')
       .exec();
 
     if (users.length === 0) {
@@ -361,32 +364,279 @@ export class NotificationsService implements OnModuleInit {
       return { sent: 0, failed: 0 };
     }
 
-    const batchUsers: BatchUserEntry[] = users.map((user) => ({
-      userId: user._id.toString(),
-      fcmToken: user.fcmToken!,
-    }));
-
     this.logger.log({
       msg: 'Eligible users found for daily notification',
       topicId,
-      userCount: batchUsers.length,
+      userCount: users.length,
     });
 
-    const result = await this.sendToMultipleUsers(
-      batchUsers,
-      payload,
-      dailySelectionId,
-    );
+    let totalSent = 0;
+    let totalFailed = 0;
+    const totalBatches = Math.ceil(users.length / this.fcmBatchLimit);
+
+    for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+      const batchStart = batchIndex * this.fcmBatchLimit;
+      const batchUsers = users.slice(
+        batchStart,
+        batchStart + this.fcmBatchLimit,
+      );
+
+      // Build per-user messages with personalized body
+      const messages: admin.messaging.Message[] = batchUsers.map((user) => {
+        const firstName = user.name?.split(' ')[0] || 'there';
+        return {
+          token: user.fcmToken!,
+          notification: {
+            title: payload.title,
+            body: payload.body.replace('{name}', firstName),
+          },
+          ...(payload.data && { data: payload.data }),
+        };
+      });
+
+      try {
+        const batchResponse = await admin.messaging().sendEach(messages);
+
+        const invalidUserIds: string[] = [];
+
+        const logEntries = batchResponse.responses.map(
+          (response, index) => {
+            const user = batchUsers[index];
+            const now = new Date();
+
+            if (response.success) {
+              return {
+                userId: new Types.ObjectId(user._id),
+                dailySelectionId: new Types.ObjectId(dailySelectionId),
+                status: NotificationStatus.SENT,
+                sentAt: now,
+              };
+            }
+
+            const errorCode =
+              (response.error as { code?: string })?.code ?? 'unknown';
+            const errorMessage =
+              response.error?.message ?? 'Unknown error';
+
+            if (INVALID_TOKEN_CODES.includes(errorCode)) {
+              invalidUserIds.push(user._id.toString());
+            }
+
+            return {
+              userId: new Types.ObjectId(user._id),
+              dailySelectionId: new Types.ObjectId(dailySelectionId),
+              status: NotificationStatus.FAILED,
+              error: `${errorCode}: ${errorMessage}`,
+              sentAt: now,
+            };
+          },
+        );
+
+        await this.notificationLogModel.insertMany(logEntries);
+
+        if (invalidUserIds.length > 0) {
+          await this.bulkMarkTokensInvalid(invalidUserIds);
+          this.logger.warn({
+            msg: 'Invalid tokens cleaned up in batch',
+            batchNumber: batchIndex + 1,
+            invalidCount: invalidUserIds.length,
+          });
+        }
+
+        totalSent += batchResponse.successCount;
+        totalFailed += batchResponse.failureCount;
+
+        this.logger.log({
+          msg: 'Batch notification send completed',
+          batchNumber: batchIndex + 1,
+          totalBatches,
+          sent: batchResponse.successCount,
+          failed: batchResponse.failureCount,
+        });
+      } catch (error) {
+        const errorMessage =
+          (error as Error).message ?? 'Unknown batch error';
+
+        const failedEntries = batchUsers.map((user) => ({
+          userId: new Types.ObjectId(user._id),
+          dailySelectionId: new Types.ObjectId(dailySelectionId),
+          status: NotificationStatus.FAILED,
+          error: `batch_error: ${errorMessage}`,
+          sentAt: new Date(),
+        }));
+
+        await this.notificationLogModel.insertMany(failedEntries);
+        totalFailed += batchUsers.length;
+
+        this.logger.error({
+          msg: 'Entire batch failed',
+          batchNumber: batchIndex + 1,
+          totalBatches,
+          error: errorMessage,
+        });
+      }
+    }
 
     this.logger.log({
       msg: 'Daily notification dispatch completed',
       topicId,
       dailySelectionId,
-      sent: result.sent,
-      failed: result.failed,
+      sent: totalSent,
+      failed: totalFailed,
     });
 
-    return result;
+    return { sent: totalSent, failed: totalFailed };
+  }
+
+  // ─── Send daily notifications to all users (one per user) ─────────
+
+  /**
+   * Send ONE personalized daily notification to every active user who has
+   * at least one subscribed topic and a valid FCM token.
+   *
+   * Uses `{name}` placeholder in `payload.body` — replaced with the user's
+   * first name at send time. Falls back to "there" when name is missing.
+   */
+  async sendDailyNotificationsToAll(
+    payload: NotificationPayload,
+  ): Promise<BatchSendResult> {
+    this.logger.log({
+      msg: 'Starting daily notification dispatch to all users',
+    });
+
+    const users = await this.userModel
+      .find({
+        isActive: true,
+        subscribedTopics: { $exists: true, $ne: [] },
+        fcmToken: { $ne: null, $exists: true },
+      })
+      .lean()
+      .select('_id fcmToken name')
+      .exec();
+
+    if (users.length === 0) {
+      this.logger.log({
+        msg: 'No eligible users found for daily notification',
+      });
+      return { sent: 0, failed: 0 };
+    }
+
+    this.logger.log({
+      msg: 'Eligible users found for daily notification',
+      userCount: users.length,
+    });
+
+    let totalSent = 0;
+    let totalFailed = 0;
+    const totalBatches = Math.ceil(users.length / this.fcmBatchLimit);
+
+    for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+      const batchStart = batchIndex * this.fcmBatchLimit;
+      const batchUsers = users.slice(
+        batchStart,
+        batchStart + this.fcmBatchLimit,
+      );
+
+      // Build per-user messages with personalized body
+      const messages: admin.messaging.Message[] = batchUsers.map((user) => {
+        const firstName = user.name?.split(' ')[0] || 'there';
+        return {
+          token: user.fcmToken!,
+          notification: {
+            title: payload.title,
+            body: payload.body.replace('{name}', firstName),
+          },
+          ...(payload.data && { data: payload.data }),
+        };
+      });
+
+      try {
+        const batchResponse = await admin.messaging().sendEach(messages);
+
+        const invalidUserIds: string[] = [];
+
+        const logEntries = batchResponse.responses.map(
+          (response, index) => {
+            const user = batchUsers[index];
+            const now = new Date();
+
+            if (response.success) {
+              return {
+                userId: new Types.ObjectId(user._id),
+                status: NotificationStatus.SENT,
+                sentAt: now,
+              };
+            }
+
+            const errorCode =
+              (response.error as { code?: string })?.code ?? 'unknown';
+            const errorMessage =
+              response.error?.message ?? 'Unknown error';
+
+            if (INVALID_TOKEN_CODES.includes(errorCode)) {
+              invalidUserIds.push(user._id.toString());
+            }
+
+            return {
+              userId: new Types.ObjectId(user._id),
+              status: NotificationStatus.FAILED,
+              error: `${errorCode}: ${errorMessage}`,
+              sentAt: now,
+            };
+          },
+        );
+
+        await this.notificationLogModel.insertMany(logEntries);
+
+        if (invalidUserIds.length > 0) {
+          await this.bulkMarkTokensInvalid(invalidUserIds);
+          this.logger.warn({
+            msg: 'Invalid tokens cleaned up in batch',
+            batchNumber: batchIndex + 1,
+            invalidCount: invalidUserIds.length,
+          });
+        }
+
+        totalSent += batchResponse.successCount;
+        totalFailed += batchResponse.failureCount;
+
+        this.logger.log({
+          msg: 'Batch notification send completed',
+          batchNumber: batchIndex + 1,
+          totalBatches,
+          sent: batchResponse.successCount,
+          failed: batchResponse.failureCount,
+        });
+      } catch (error) {
+        const errorMessage =
+          (error as Error).message ?? 'Unknown batch error';
+
+        const failedEntries = batchUsers.map((user) => ({
+          userId: new Types.ObjectId(user._id),
+          status: NotificationStatus.FAILED,
+          error: `batch_error: ${errorMessage}`,
+          sentAt: new Date(),
+        }));
+
+        await this.notificationLogModel.insertMany(failedEntries);
+        totalFailed += batchUsers.length;
+
+        this.logger.error({
+          msg: 'Entire batch failed',
+          batchNumber: batchIndex + 1,
+          totalBatches,
+          error: errorMessage,
+        });
+      }
+    }
+
+    this.logger.log({
+      msg: 'Daily notification dispatch completed',
+      sent: totalSent,
+      failed: totalFailed,
+    });
+
+    return { sent: totalSent, failed: totalFailed };
   }
 
   // ─── Notification history ──────────────────────────────────────────

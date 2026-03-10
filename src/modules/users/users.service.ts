@@ -127,7 +127,7 @@ export class UsersService {
   // ──────────────────────────── Update Profile ───────────────────────────────
 
   /**
-   * Partial update of user profile. Checks unique constraints for email/username.
+   * Partial update of user profile. Checks unique constraint for email.
    */
   async updateProfile(userId: string, dto: UpdateProfileDto): Promise<User> {
     this.logger.info(
@@ -136,43 +136,30 @@ export class UsersService {
     );
 
     try {
-      // Check unique constraints if email or username is being updated
-      if (dto.email || dto.username) {
-        const orConditions: Record<string, string>[] = [];
-
-        if (dto.email) {
-          orConditions.push({ email: dto.email.toLowerCase() });
-        }
-        if (dto.username) {
-          orConditions.push({ username: dto.username.toLowerCase() });
-        }
-
+      // Check unique constraint for email
+      if (dto.email) {
         const existing = await this.userModel
           .findOne({
             _id: { $ne: new Types.ObjectId(userId) },
-            $or: orConditions,
+            email: dto.email.toLowerCase(),
           })
           .lean()
           .exec();
 
         if (existing) {
-          const conflictField =
-            dto.email && existing.email === dto.email.toLowerCase()
-              ? 'email'
-              : 'username';
           this.logger.warn(
-            { userId, conflictField },
-            'Profile update failed: duplicate field',
+            { userId, conflictField: 'email' },
+            'Profile update failed: duplicate email',
           );
           throw new ConflictException(
-            `An account with this ${conflictField} already exists.`,
+            'An account with this email already exists.',
           );
         }
       }
 
       const updatePayload: Record<string, unknown> = {};
       if (dto.email) updatePayload.email = dto.email.toLowerCase();
-      if (dto.username) updatePayload.username = dto.username.toLowerCase();
+      if (dto.name) updatePayload.name = dto.name.trim();
 
       const updatedUser = await this.userModel
         .findByIdAndUpdate(userId, { $set: updatePayload }, { new: true })
@@ -209,7 +196,7 @@ export class UsersService {
           'Profile update failed: duplicate key error',
         );
         throw new ConflictException(
-          'An account with this email or username already exists.',
+          'An account with this email already exists.',
         );
       }
 
