@@ -37,9 +37,10 @@ export const validationSchema = Joi.object({
   RAZORPAY_WEBHOOK_SECRET: Joi.string().optional().default(''),
   RAZORPAY_PLAN_ID: Joi.string().optional().default(''),
 
-  // Email — Resend (optional — email features disabled without it)
-  RESEND_API_KEY: Joi.string().optional().allow('').default(''),
-  EMAIL_FROM: Joi.string().optional().allow('').default('StackDaily <onboarding@resend.dev>'),
+  // Email — Brevo (optional — email features disabled without it)
+  BREVO_API_KEY: Joi.string().optional().allow('').default(''),
+  EMAIL_FROM_NAME: Joi.string().optional().default('StackDaily'),
+  EMAIL_FROM_ADDRESS: Joi.string().optional().default('stackdaily.app@gmail.com'),
 
   // Google Sign-In (optional — Google auth disabled without it)
   GOOGLE_CLIENT_ID: Joi.string().optional().allow('').default(''),
@@ -78,8 +79,9 @@ export const razorpayConfig = registerAs('razorpay', () => ({
 }));
 
 export const emailConfig = registerAs('email', () => ({
-  resendApiKey: process.env.RESEND_API_KEY || '',
-  from: process.env.EMAIL_FROM || 'StackDaily <onboarding@resend.dev>',
+  brevoApiKey: process.env.BREVO_API_KEY || '',
+  fromName: process.env.EMAIL_FROM_NAME || 'StackDaily',
+  fromAddress: process.env.EMAIL_FROM_ADDRESS || 'stackdaily.app@gmail.com',
 }));
 
 export const googleConfig = registerAs('google', () => ({

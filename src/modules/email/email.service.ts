@@ -1,12 +1,12 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
-import { Resend } from 'resend';
 
 @Injectable()
 export class EmailService {
-  private resend: Resend | null = null;
-  private readonly from: string;
+  private readonly apiKey: string;
+  private readonly fromName: string;
+  private readonly fromAddress: string;
   private readonly isProduction: boolean;
 
   constructor(
@@ -15,15 +15,15 @@ export class EmailService {
   ) {
     this.isProduction =
       this.configService.get<string>('app.nodeEnv') === 'production';
-    this.from = this.configService.get<string>('email.from')!;
-    const apiKey = this.configService.get<string>('email.resendApiKey');
+    this.apiKey = this.configService.get<string>('email.brevoApiKey')!;
+    this.fromName = this.configService.get<string>('email.fromName')!;
+    this.fromAddress = this.configService.get<string>('email.fromAddress')!;
 
-    if (apiKey) {
-      this.resend = new Resend(apiKey);
-      this.logger.info('Resend email client initialized');
+    if (this.apiKey) {
+      this.logger.info('Brevo email client initialized');
     } else {
       this.logger.warn(
-        'RESEND_API_KEY not configured — email sending disabled',
+        'BREVO_API_KEY not configured — email sending disabled',
       );
     }
   }
@@ -41,17 +41,17 @@ export class EmailService {
     otp: string,
     type: 'verification' | 'reset',
   ): Promise<void> {
-    if (!this.resend) {
+    if (!this.apiKey) {
       if (this.isProduction) {
         this.logger.error(
           { to, type },
-          'Email send failed — Resend not configured in production',
+          'Email send failed — Brevo not configured in production',
         );
         throw new InternalServerErrorException(
           'Email service is not configured. Please contact support.',
         );
       }
-      this.logger.warn({ to, type }, 'Email send skipped — no Resend client (dev mode)');
+      this.logger.warn({ to, type }, 'Email send skipped — no Brevo API key (dev mode)');
       return;
     }
 
@@ -62,7 +62,7 @@ export class EmailService {
 
     const safeOtp = this.escapeHtml(otp);
 
-    const html = `
+    const htmlContent = `
       <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto;">
         <h2 style="color: #6200EE;">StackDaily</h2>
         <p>Your ${type === 'verification' ? 'email verification' : 'password reset'} code is:</p>
@@ -75,19 +75,33 @@ export class EmailService {
     `;
 
     try {
-      const { error } = await this.resend.emails.send({
-        from: this.from,
-        to,
-        subject,
-        html,
+      const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'api-key': this.apiKey,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          sender: { name: this.fromName, email: this.fromAddress },
+          to: [{ email: to }],
+          subject,
+          htmlContent,
+        }),
       });
 
-      if (error) {
-        this.logger.error({ err: error, to, type }, 'Resend API returned error');
-        throw new Error(error.message);
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}));
+        this.logger.error(
+          { status: response.status, err: errorBody, to, type },
+          'Brevo API returned error',
+        );
+        throw new Error(
+          (errorBody as any)?.message || `Brevo API error: ${response.status}`,
+        );
       }
 
-      this.logger.info({ to, type }, 'OTP email sent via Resend');
+      this.logger.info({ to, type }, 'OTP email sent via Brevo');
     } catch (error) {
       this.logger.error({ err: error, to, type }, 'Failed to send OTP email');
       throw error;
