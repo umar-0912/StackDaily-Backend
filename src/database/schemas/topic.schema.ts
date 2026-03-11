@@ -57,6 +57,12 @@ export class Topic {
   isActive: boolean;
 
   @Prop({
+    type: Boolean,
+    default: false,
+  })
+  isPublished: boolean;
+
+  @Prop({
     type: Number,
     default: 0,
   })
@@ -65,5 +71,5 @@ export class Topic {
 
 export const TopicSchema = SchemaFactory.createForClass(Topic);
 
-// Compound index for listing active topics sorted by order
-TopicSchema.index({ isActive: 1, sortOrder: 1 });
+// Compound index for listing active + published topics sorted by order
+TopicSchema.index({ isActive: 1, isPublished: 1, sortOrder: 1 });

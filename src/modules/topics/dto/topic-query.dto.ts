@@ -23,6 +23,14 @@ export class TopicQueryDto {
   isActive?: string;
 
   @ApiPropertyOptional({
+    description: 'Filter by published status ("true" or "false"). Defaults to "true" (only published topics). Admin can pass "false" to see unpublished.',
+    example: 'true',
+  })
+  @IsBooleanString()
+  @IsOptional()
+  isPublished?: string;
+
+  @ApiPropertyOptional({
     description: 'Page number for pagination (starts at 1)',
     example: '1',
     default: '1',
