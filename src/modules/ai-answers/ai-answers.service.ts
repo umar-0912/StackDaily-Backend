@@ -299,11 +299,11 @@ export class AiAnswersService implements OnModuleInit {
   // ───────────────────────────────────────────────────────────────
 
   /**
-   * Runs every day at 03:30 PM (15:30).
+   * Runs every day at 04:00 PM (16:00).
    * Finds all active questions missing a non-stale answer and generates them
    * in rate-limit-friendly batches.
    */
-  @Cron('30 15 * * *')
+  @Cron('0 16 * * *')
   async nightlyGeneration(): Promise<void> {
     const startTime = Date.now();
     this.logger.log('Starting nightly AI answer generation');
