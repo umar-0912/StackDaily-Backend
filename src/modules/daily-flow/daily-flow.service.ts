@@ -38,7 +38,7 @@ interface FlowSummary {
 /**
  * Service orchestrating the daily learning flow:
  * - Selects a question per active topic (for admin stats / DailySelection records)
- * - Sends generic push notifications to subscribed users
+ * - Sends one personalized push notification per user
  * - Provides personalized daily feeds via ProgressService
  * - Manages user streaks
  */
