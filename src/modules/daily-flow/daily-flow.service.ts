@@ -95,7 +95,7 @@ export class DailyFlowService {
    * Note: The personalized question per user is computed on-demand in getDailyFeed().
    * Notifications are sent once per user (not per topic) with `{name}` placeholder.
    */
-  @Cron('0 20 * * *')
+  @Cron('30 14 * * *')
   async runDailyFlow(): Promise<void> {
     const startTime = Date.now();
     const today = this.getTodayDate();
@@ -525,7 +525,7 @@ export class DailyFlowService {
    * Runs at midnight daily. Resets streaks for users who have not been
    * active since yesterday (1 missed day = streak reset).
    */
-  @Cron('0 0 * * *')
+  @Cron('30 18 * * *')
   async resetStaleStreaks(): Promise<void> {
     this.logger.log({ msg: 'Starting stale streak reset' });
 
