@@ -47,8 +47,8 @@ export class TopicsService {
   /** Cache TTL in milliseconds (5 minutes). */
   private static readonly CACHE_TTL_MS = 5 * 60 * 1000;
 
-  /** Cache key for the active topics query. */
-  private static readonly CACHE_KEY_ACTIVE_TOPICS = 'activeTopics';
+  /** Cache key for the active + published topics query. */
+  private static readonly CACHE_KEY_ACTIVE_TOPICS = 'activePublishedTopics';
 
   constructor(
     @InjectModel(Topic.name)
@@ -77,6 +77,14 @@ export class TopicsService {
 
       if (query.isActive !== undefined) {
         filter.isActive = query.isActive === 'true';
+      }
+
+      // Default: only show published topics to public consumers.
+      // Admin can explicitly pass isPublished=false to see unpublished.
+      if (query.isPublished !== undefined) {
+        filter.isPublished = query.isPublished === 'true';
+      } else {
+        filter.isPublished = true;
       }
 
       this.logger.log({
@@ -244,7 +252,7 @@ export class TopicsService {
   // ───────────────────────── Active topics (cached) ───────────────────────────
 
   /**
-   * Return all active topics sorted by `sortOrder`.
+   * Return all active + published topics sorted by `sortOrder`.
    * Results are cached in memory with a 5-minute TTL for read performance.
    */
   async findActiveTopics(): Promise<Topic[]> {
@@ -259,7 +267,7 @@ export class TopicsService {
     this.logger.log({ msg: 'Cache miss for active topics, querying database' });
 
     const topics = await this.topicModel
-      .find({ isActive: true })
+      .find({ isActive: true, isPublished: true })
       .sort({ sortOrder: 1 })
       .lean()
       .exec();

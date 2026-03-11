@@ -85,7 +85,7 @@ export class DailyFlowService {
    * Main daily flow orchestration. Runs at 8 PM every day.
    *
    * Steps:
-   * 1. Fetch all active topics
+   * 1. Fetch all active + published topics
    * 2. Select a question for each topic (least recently used) for admin stats
    * 3. Verify AI answers exist for selected questions
    * 4. Create DailySelection records (idempotent via upsert)
@@ -114,9 +114,9 @@ export class DailyFlowService {
     });
 
     try {
-      // ── Step 1: Get all active topics ──────────────────────────────────
+      // ── Step 1: Get all active + published topics ───────────────────────
       const activeTopics = await this.topicModel
-        .find({ isActive: true })
+        .find({ isActive: true, isPublished: true })
         .sort({ sortOrder: 1 })
         .lean()
         .exec();
