@@ -138,6 +138,18 @@ class FeedProgressDto {
     example: 'intermediate',
   })
   currentDifficulty: string;
+
+  @ApiProperty({
+    description: 'Whether the user has already answered this question today',
+    example: false,
+  })
+  isRead: boolean;
+
+  @ApiProperty({
+    description: 'Whether the user can watch an ad to advance to the next question',
+    example: true,
+  })
+  canAdvance: boolean;
 }
 
 /**

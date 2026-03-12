@@ -70,6 +70,12 @@ export class UserTopicProgress {
   lastQuestionId: Types.ObjectId | null;
 
   @Prop({
+    type: String,
+    default: null,
+  })
+  lastAdvancedDate: string | null;
+
+  @Prop({
     type: Date,
     default: null,
   })

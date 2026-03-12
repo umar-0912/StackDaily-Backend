@@ -187,32 +187,54 @@ export class ProgressService {
     topicId: string,
   ): Promise<UserTopicProgressDocument> {
     const today = new Date().toISOString().split('T')[0];
+    const userOid = new Types.ObjectId(userId);
+    const topicOid = new Types.ObjectId(topicId);
+    const incSet = {
+      $inc: { currentQuestionIndex: 1, questionsAnswered: 1 },
+      $set: { lastQuestionDate: `${today}:read` },
+    };
 
-    // Atomic: only advance if a question was served today (lastQuestionDate === today)
-    // and hasn't already been marked as read (lastQuestionDate becomes "YYYY-MM-DD:read"
-    // after advance). This prevents double-tap from skipping a question.
-    const updated = await this.progressModel
+    // Phase 1: Exact match — question was served today and not yet read.
+    let updated = await this.progressModel
       .findOneAndUpdate(
-        {
-          userId: new Types.ObjectId(userId),
-          topicId: new Types.ObjectId(topicId),
-          lastQuestionDate: today, // Must match exactly — not "today:read"
-        },
-        {
-          $inc: { currentQuestionIndex: 1, questionsAnswered: 1 },
-          $set: { lastQuestionDate: `${today}:read` },
-        },
+        { userId: userOid, topicId: topicOid, lastQuestionDate: today },
+        incSet,
         { new: true },
       )
       .exec();
 
+    // Phase 2: Cross-day fallback — question was served on a previous day but
+    // quiz submitted today (e.g. app was in background overnight).
+    // Guard: lastQuestionDate must NOT end with ":read" (prevents double-advance)
+    // and must NOT be null (no question was ever served).
+    if (!updated) {
+      updated = await this.progressModel
+        .findOneAndUpdate(
+          {
+            userId: userOid,
+            topicId: topicOid,
+            lastQuestionDate: { $ne: null, $not: /:read$/ },
+          },
+          incSet,
+          { new: true },
+        )
+        .exec();
+
+      if (updated) {
+        this.logger.log({
+          msg: 'Cross-day advance: question served on a previous day, submitted today',
+          userId,
+          topicId,
+        });
+      }
+    }
+
     if (!updated) {
       this.logger.warn({
-        msg: 'Advance skipped: no unread question served today (likely double-tap)',
+        msg: 'Advance skipped: already read today or no question served',
         userId,
         topicId,
       });
-      // Return current state without changes
       return this.getOrCreateProgress(userId, topicId);
     }
 
@@ -243,6 +265,99 @@ export class ProgressService {
     });
 
     return updated;
+  }
+
+  // ──────────────────── Get Next Question (Ad-based) ─────────────────────
+
+  /**
+   * Unlock the next question for a user after watching an ad.
+   * Guards:
+   * - Current question must already be read (lastQuestionDate ends with :read)
+   * - Must not have already advanced today (lastAdvancedDate !== today)
+   *
+   * On success: updates lastQuestionDate, lastQuestionId, and lastAdvancedDate.
+   */
+  async getNextQuestionForced(
+    userId: string,
+    topicId: string,
+  ): Promise<{
+    question: Record<string, unknown> | null;
+    progress: UserTopicProgressDocument;
+  }> {
+    const today = new Date().toISOString().split('T')[0];
+    const progress = await this.getOrCreateProgress(userId, topicId);
+
+    // Guard: question must have been read today or on a previous day
+    const isRead = progress.lastQuestionDate?.endsWith(':read');
+    if (!isRead) {
+      this.logger.warn({
+        msg: 'getNextQuestionForced: current question not yet read',
+        userId,
+        topicId,
+      });
+      return { question: null, progress };
+    }
+
+    // Guard: can only advance once per day via ad
+    if (progress.lastAdvancedDate === today) {
+      this.logger.warn({
+        msg: 'getNextQuestionForced: already advanced today',
+        userId,
+        topicId,
+      });
+      return { question: null, progress };
+    }
+
+    // currentQuestionIndex was already incremented by advanceProgress/mark-read
+    let question = await this.getQuestionAtIndex(
+      topicId,
+      progress.currentQuestionIndex,
+    );
+
+    // Handle topic exhaustion — cycle to index 0
+    if (!question) {
+      const totalQuestions = await this.countActiveQuestions(topicId);
+      if (totalQuestions === 0) {
+        return { question: null, progress };
+      }
+
+      progress.status = ProgressStatus.COMPLETED;
+      progress.completedAt = new Date();
+      progress.currentQuestionIndex = 0;
+
+      question = await this.getQuestionAtIndex(topicId, 0);
+      if (!question) {
+        await progress.save();
+        return { question: null, progress };
+      }
+    }
+
+    // Update progress: serve the new question today
+    progress.lastQuestionDate = today;
+    progress.lastQuestionId = (question as any)._id;
+    progress.lastAdvancedDate = today;
+
+    if (
+      progress.status === ProgressStatus.NOT_STARTED ||
+      (progress.status === ProgressStatus.COMPLETED &&
+        progress.currentQuestionIndex === 0)
+    ) {
+      progress.status = ProgressStatus.IN_PROGRESS;
+      progress.startedAt = new Date();
+      progress.completedAt = null;
+    }
+
+    await progress.save();
+
+    this.logger.log({
+      msg: 'Next question unlocked via ad',
+      userId,
+      topicId,
+      questionIndex: progress.currentQuestionIndex,
+      questionId: ((question as any)._id).toString(),
+    });
+
+    return { question: question as Record<string, unknown>, progress };
   }
 
   // ──────────────────── Get User Progress ─────────────────────────────────

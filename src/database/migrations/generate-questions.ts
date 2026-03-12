@@ -34,6 +34,81 @@ const DELAY_MS = 2_000;
 // ── Category-specific prompt instructions ──────────────────────────────
 
 const CATEGORY_PROMPTS: Record<string, string> = {
+  // ── Developer / Tech topics ──────────────────────────────────────────
+  'Programming Languages': `You are a senior software engineer and expert technical interviewer.
+Rules:
+- Generate questions that test REAL understanding of the language/framework, not trivia.
+- Include code-based conceptual questions (describe what code does, find bugs, predict output).
+- Cover core concepts, common pitfalls, best practices, and real-world usage patterns.
+- Beginner: fundamentals, syntax, basic concepts.
+- Intermediate: closures, async, design patterns, error handling, performance.
+- Advanced: memory model, event loop internals, metaprogramming, compiler behavior, edge cases.
+- Questions should be the kind asked in top-tier technical interviews (Google, Meta level).`,
+
+  'Frontend': `You are a senior frontend engineer and expert technical interviewer.
+Rules:
+- Generate questions about component architecture, state management, rendering lifecycle, hooks, performance.
+- Include questions on virtual DOM, reconciliation, memoization, code splitting, SSR/CSR.
+- Beginner: JSX, props, state, basic hooks.
+- Intermediate: custom hooks, context, refs, error boundaries, React patterns.
+- Advanced: fiber architecture, concurrent mode, reconciler internals, render optimization, suspense.
+- Questions should mirror real senior frontend interview questions.`,
+
+  'Backend': `You are a senior backend engineer and expert technical interviewer.
+Rules:
+- Generate questions about server architecture, APIs, middleware, authentication, databases, scaling.
+- Include questions on event loop, streams, clustering, microservices, caching, security.
+- Beginner: HTTP basics, routing, middleware concepts, npm.
+- Intermediate: authentication patterns, database integration, error handling, testing, REST design.
+- Advanced: event loop internals, worker threads, performance profiling, memory leaks, streaming, cluster module.
+- Questions should match senior backend engineering interview standards.`,
+
+  'Architecture': `You are a principal engineer specializing in system design interviews.
+Rules:
+- Generate questions that test architectural thinking, trade-offs, and scalability reasoning.
+- Include questions on load balancing, caching, databases, message queues, CDN, microservices.
+- Beginner: client-server model, REST vs GraphQL, monolith vs microservices, basic scaling.
+- Intermediate: database sharding, CAP theorem, event-driven architecture, rate limiting, consistent hashing.
+- Advanced: distributed consensus, CRDT, leader election, global-scale architecture, multi-region design.
+- Each question should require reasoning about trade-offs, not just definitions.`,
+
+  'Computer Science': `You are an expert algorithms and data structures instructor.
+Rules:
+- Generate questions that test understanding of time/space complexity, optimal data structure choice, and algorithmic thinking.
+- Include questions about arrays, linked lists, trees, graphs, heaps, hash tables, tries, stacks, queues.
+- Beginner: basic operations, simple traversals, Big-O basics.
+- Intermediate: balanced trees, graph traversals, dynamic programming, two pointers, sliding window.
+- Advanced: segment trees, Fenwick trees, advanced graph algorithms, amortized analysis, NP-completeness.
+- Questions should be conceptual (not "write code"), testing understanding of WHY and WHEN to use each structure.`,
+
+  'Cloud': `You are a certified AWS Solutions Architect (Professional level).
+Rules:
+- Generate questions that test practical AWS knowledge, not just service definitions.
+- Include scenario-based questions: "given these requirements, which service/architecture?"
+- Beginner: core services (EC2, S3, RDS, Lambda, IAM basics).
+- Intermediate: VPC design, auto-scaling, CloudFront, DynamoDB, SQS/SNS, cost optimization.
+- Advanced: multi-region DR, cross-account access, complex IAM policies, Well-Architected Framework, serverless patterns.
+- Style should match AWS Certified Solutions Architect exam questions.`,
+
+  'DevOps': `You are a senior DevOps/Platform engineer and Docker/container expert.
+Rules:
+- Generate questions about containerization, orchestration, CI/CD, and infrastructure.
+- Include questions on Dockerfile best practices, multi-stage builds, networking, volumes, security.
+- Beginner: basic Docker commands, images vs containers, Dockerfile basics.
+- Intermediate: multi-stage builds, Docker Compose, networking modes, volume management, health checks.
+- Advanced: container security, runtime internals (cgroups, namespaces), orchestration, image optimization, rootless containers.
+- Questions should test practical, production-level Docker knowledge.`,
+
+  'Databases': `You are a senior database architect and SQL expert.
+Rules:
+- Generate questions that test query writing, optimization, schema design, and database internals.
+- Include questions on joins, indexing, transactions, normalization, query plans, replication.
+- Beginner: basic SELECT/INSERT/UPDATE, WHERE, GROUP BY, simple joins.
+- Intermediate: complex joins, subqueries, window functions, indexing strategies, transactions (ACID).
+- Advanced: query plan optimization, lock contention, partitioning, replication lag, sharding, stored procedures.
+- Questions should be practical — the kind that separate junior from senior database engineers.`,
+
+  // ── Non-tech categories ──────────────────────────────────────────────
   'Government Exams': `You are an expert question setter for Indian competitive exams (SSC CGL, UPSC Prelims, Banking PO, Railway RRB).
 Rules:
 - Generate questions at SSC CGL / UPSC Prelims / Banking PO difficulty level.
@@ -196,6 +271,7 @@ async function run() {
     ? args[args.indexOf('--topic') + 1]
     : null;
   const dryRun = args.includes('--dry-run');
+  const publishedOnly = args.includes('--published');
 
   await mongoose.connect(MONGODB_URI!);
   console.log('Connected to MongoDB');
@@ -206,10 +282,15 @@ async function run() {
     process.exit(1);
   }
 
-  // Find topics to process — only unpublished (new) topics by default
+  // Find topics to process
+  // --topic <slug>  → single topic
+  // --published     → all published (active) topics
+  // default         → unpublished topics only
   const topicFilter: Record<string, unknown> = topicSlugArg
     ? { slug: topicSlugArg }
-    : { isPublished: false, isActive: true };
+    : publishedOnly
+      ? { isPublished: true, isActive: true }
+      : { isPublished: false, isActive: true };
 
   const topics = await db
     .collection('topics')

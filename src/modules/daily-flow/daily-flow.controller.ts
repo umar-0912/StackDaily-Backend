@@ -36,6 +36,7 @@ import { DailyFeedItemDto } from './dto/daily-feed-item.dto.js';
 import { DailyStatsDto } from './dto/daily-stats.dto.js';
 import { DailyStatsQueryDto } from './dto/daily-stats-query.dto.js';
 import { MarkReadDto } from './dto/mark-read.dto.js';
+import { NextQuestionDto } from './dto/next-question.dto.js';
 
 /**
  * Controller handling all daily flow endpoints:
@@ -114,6 +115,52 @@ export class DailyFlowController {
 
     await this.dailyFlowService.markAsRead(userId, dto.dailySelectionId, dto.topicId);
     return { message: 'Progress advanced and streak updated' };
+  }
+
+  // ──────────────────── POST /next-question ──────────────────────────────────
+
+  /**
+   * Unlock the next question for a topic after watching an ad.
+   * Can only be used once per topic per day, and only after the current
+   * question has been marked as read.
+   */
+  @Post('next-question')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Unlock next question for a topic after watching an ad' })
+  @ApiBody({ type: NextQuestionDto })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Next question unlocked and returned as a feed item',
+    type: DailyFeedItemDto,
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Cannot advance — question not read or already advanced today',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'Authentication required',
+  })
+  async getNextQuestion(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: NextQuestionDto,
+  ): Promise<DailyFeedItemDto | { message: string }> {
+    const userId = user._id.toString();
+    this.logger.log({
+      msg: 'POST /api/v1/daily/next-question',
+      userId,
+      topicId: dto.topicId,
+    });
+
+    const result = await this.dailyFlowService.getNextQuestion(userId, dto.topicId);
+
+    if (!result) {
+      return { message: 'Cannot advance — question not yet read or already advanced today' };
+    }
+
+    return result;
   }
 
   // ──────────────────────── GET /stats (admin) ───────────────────────────────

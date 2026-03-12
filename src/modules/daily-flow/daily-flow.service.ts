@@ -381,6 +381,12 @@ export class DailyFlowService {
           // Use a stable ID for the feed item (progress record ID)
           const feedItemId = (progress as any)._id?.toString() || topicIdStr;
 
+          // Compute read/advance flags
+          const today = this.getTodayDate();
+          const isRead = progress.lastQuestionDate === `${today}:read`;
+          const canAdvance =
+            isRead && (progress as any).lastAdvancedDate !== today;
+
           return {
             dailySelectionId: feedItemId,
             topic: {
@@ -404,6 +410,8 @@ export class DailyFlowService {
               questionsAnswered: progress.questionsAnswered,
               totalQuestions,
               currentDifficulty: (question as any).difficulty,
+              isRead,
+              canAdvance,
             },
           } as DailyFeedItemDto;
         } catch (error: any) {
@@ -517,6 +525,76 @@ export class DailyFlowService {
       maxStreak: newMax,
       date: today,
     });
+  }
+
+  // ──────────────────── Get Next Question (Ad-based) ────────────────────────
+
+  /**
+   * Unlock the next question for a topic after user watches an ad.
+   * Returns a full DailyFeedItemDto with the new question, answer, and progress.
+   */
+  async getNextQuestion(
+    userId: string,
+    topicId: string,
+  ): Promise<DailyFeedItemDto | null> {
+    const { question, progress } =
+      await this.progressService.getNextQuestionForced(userId, topicId);
+
+    if (!question) {
+      return null;
+    }
+
+    const questionId = (question as any)._id;
+
+    // Look up AI answer
+    const aiAnswer = await this.aiAnswerModel
+      .findOne({ questionId })
+      .lean()
+      .exec();
+
+    // Look up topic
+    const topic = await this.topicModel
+      .findById(topicId)
+      .select('name slug icon')
+      .lean()
+      .exec();
+
+    if (!topic) {
+      return null;
+    }
+
+    const totalQuestions =
+      await this.progressService.countActiveQuestions(topicId);
+
+    const feedItemId = (progress as any)._id?.toString() || topicId;
+
+    return {
+      dailySelectionId: feedItemId,
+      topic: {
+        _id: topicId,
+        name: topic.name,
+        slug: topic.slug,
+        icon: (topic as any).icon || null,
+      },
+      question: {
+        text: (question as any).text,
+        difficulty: (question as any).difficulty,
+        tags: (question as any).tags || [],
+      },
+      answer: {
+        content: aiAnswer?.answer || '',
+        generatedAt: aiAnswer?.generatedAt || null,
+        mcqs: aiAnswer?.mcqs || [],
+      },
+      progress: {
+        status: progress.status,
+        questionsAnswered: progress.questionsAnswered,
+        totalQuestions,
+        currentDifficulty: (question as any).difficulty,
+        isRead: false, // New question, not yet read
+        canAdvance: false, // Just advanced, can't advance again today
+      },
+    } as DailyFeedItemDto;
   }
 
   // ──────────────────── Reset Stale Streaks Cron ─────────────────────────────
