@@ -454,7 +454,7 @@ export class DailyFlowService {
     userId: string,
     _dailySelectionId: string,
     topicId: string,
-  ): Promise<void> {
+  ): Promise<{ canAdvance: boolean }> {
     const today = this.getTodayDate();
     const yesterday = this.getYesterdayDate();
 
@@ -465,7 +465,10 @@ export class DailyFlowService {
     });
 
     // Advance the user's progress for this topic
-    await this.progressService.advanceProgress(userId, topicId);
+    const progress = await this.progressService.advanceProgress(userId, topicId);
+
+    // Compute whether user can advance to next question via ad
+    const canAdvance = (progress as any).lastAdvancedDate !== today;
 
     // Get current user streak state
     const user = await this.userModel
@@ -492,7 +495,7 @@ export class DailyFlowService {
         userId,
         currentStreak: user.streak?.count ?? 0,
       });
-      return;
+      return { canAdvance };
     } else if (lastActiveDate === yesterday) {
       // Consecutive day: increment streak
       newCount = (user.streak?.count ?? 0) + 1;
@@ -525,6 +528,8 @@ export class DailyFlowService {
       maxStreak: newMax,
       date: today,
     });
+
+    return { canAdvance };
   }
 
   // ──────────────────── Get Next Question (Ad-based) ────────────────────────

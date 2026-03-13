@@ -104,7 +104,7 @@ export class DailyFlowController {
   async markAsRead(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: MarkReadDto,
-  ): Promise<{ message: string }> {
+  ): Promise<{ message: string; canAdvance: boolean }> {
     const userId = user._id.toString();
     this.logger.log({
       msg: 'POST /api/v1/daily/mark-read',
@@ -113,8 +113,8 @@ export class DailyFlowController {
       topicId: dto.topicId,
     });
 
-    await this.dailyFlowService.markAsRead(userId, dto.dailySelectionId, dto.topicId);
-    return { message: 'Progress advanced and streak updated' };
+    const result = await this.dailyFlowService.markAsRead(userId, dto.dailySelectionId, dto.topicId);
+    return { message: 'Progress advanced and streak updated', canAdvance: result.canAdvance };
   }
 
   // ──────────────────── POST /next-question ──────────────────────────────────
