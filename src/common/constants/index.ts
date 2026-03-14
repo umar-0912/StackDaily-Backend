@@ -104,3 +104,31 @@ export const SUBSCRIPTION_PLANS = {
     durationDays: 30,
   },
 } as const;
+
+/**
+ * Subscription tier configuration for Pro plans.
+ * All tiers are billed monthly with different commitment lengths.
+ */
+export const SUBSCRIPTION_TIERS = {
+  monthly: {
+    name: 'Monthly',
+    priceInPaise: 3000,
+    billingCycleDays: 30,
+    totalCount: 1,
+    savingsPercent: 0,
+  },
+  half_yearly: {
+    name: 'Half-Yearly',
+    priceInPaise: 2000,
+    billingCycleDays: 30,
+    totalCount: 6,
+    savingsPercent: 33,
+  },
+  yearly: {
+    name: 'Yearly',
+    priceInPaise: 1500,
+    billingCycleDays: 30,
+    totalCount: 12,
+    savingsPercent: 50,
+  },
+} as const;

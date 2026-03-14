@@ -59,15 +59,16 @@ export class RazorpayService implements OnModuleInit {
   async createSubscription(
     planId: string,
     customerId: string,
+    totalCount: number,
   ): Promise<{ id: string; short_url: string }> {
     const subscription = (await this.razorpay.subscriptions.create({
       plan_id: planId,
       customer_id: customerId,
-      total_count: 12, // 12 monthly billing cycles (1 year), auto-renews via webhook
+      total_count: totalCount,
       customer_notify: 1,
     } as any)) as { id: string; short_url: string };
     this.logger.info(
-      { subscriptionId: subscription.id, planId },
+      { subscriptionId: subscription.id, planId, totalCount },
       'Razorpay subscription created',
     );
     return { id: subscription.id, short_url: subscription.short_url! };

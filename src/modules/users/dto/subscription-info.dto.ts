@@ -16,6 +16,28 @@ export class SubscriptionInfoDto {
   status: string;
 
   @ApiProperty({
+    description: 'Subscription tier (null for free plan)',
+    enum: ['monthly', 'half_yearly', 'yearly'],
+    example: null,
+    nullable: true,
+  })
+  tier: string | null;
+
+  @ApiProperty({
+    description: 'Human-readable tier name (null for free plan)',
+    example: null,
+    nullable: true,
+  })
+  tierName: string | null;
+
+  @ApiProperty({
+    description: 'Price per month in rupees (null for free plan)',
+    example: null,
+    nullable: true,
+  })
+  pricePerMonth: number | null;
+
+  @ApiProperty({
     description: 'Maximum topics allowed (null = unlimited)',
     example: 3,
     nullable: true,

@@ -14,9 +14,10 @@ import {
   UserDocument,
   SubscriptionPlan,
   SubscriptionStatus,
+  SubscriptionTier,
 } from '../../database/schemas/user.schema.js';
 import { RazorpayService } from './razorpay.service.js';
-import { ERROR_MESSAGES } from '../../common/constants/index.js';
+import { ERROR_MESSAGES, SUBSCRIPTION_PLANS, SUBSCRIPTION_TIERS } from '../../common/constants/index.js';
 
 @Injectable()
 export class PaymentsService {
@@ -30,14 +31,33 @@ export class PaymentsService {
 
   // ──────────────────── Create Subscription ──────────────────────────────────
 
+  // ──────────────────── Helpers ─────────────────────────────────────────────
+
   /**
-   * Create a Razorpay subscription for the user.
+   * Resolve the Razorpay plan ID from the subscription tier.
+   */
+  private getRazorpayPlanId(tier: SubscriptionTier): string {
+    const configMap: Record<SubscriptionTier, string> = {
+      [SubscriptionTier.MONTHLY]: this.configService.get<string>('razorpay.planIdMonthly') || '',
+      [SubscriptionTier.HALF_YEARLY]: this.configService.get<string>('razorpay.planIdHalfYearly') || '',
+      [SubscriptionTier.YEARLY]: this.configService.get<string>('razorpay.planIdYearly') || '',
+    };
+    const planId = configMap[tier];
+    if (!planId) {
+      throw new BadRequestException(`Razorpay plan not configured for tier: ${tier}`);
+    }
+    return planId;
+  }
+
+  /**
+   * Create a Razorpay subscription for the user with the specified tier.
    * Returns the short_url for the user to complete payment.
    */
   async createSubscription(
     userId: string,
+    tier: SubscriptionTier,
   ): Promise<{ shortUrl: string; subscriptionId: string; razorpayKeyId: string }> {
-    this.logger.info({ userId }, 'Creating subscription');
+    this.logger.info({ userId, tier }, 'Creating subscription');
 
     const user = await this.userModel.findById(userId).lean().exec();
     if (!user) {
@@ -68,20 +88,25 @@ export class PaymentsService {
         });
       }
 
-      // Step 2: Create Razorpay subscription
-      const planId = this.configService.get<string>('razorpay.planId')!;
+      // Step 2: Create Razorpay subscription with tier-specific plan and total count
+      const planId = this.getRazorpayPlanId(tier);
+      const tierConfig = SUBSCRIPTION_TIERS[tier];
       const subscription = await this.razorpayService.createSubscription(
         planId,
         customerId,
+        tierConfig.totalCount,
       );
 
-      // Step 3: Store the subscription ID on the user
+      // Step 3: Store the subscription ID and chosen tier on the user
       await this.userModel.findByIdAndUpdate(userId, {
-        $set: { razorpaySubscriptionId: subscription.id },
+        $set: {
+          razorpaySubscriptionId: subscription.id,
+          'subscription.tier': tier,
+        },
       });
 
       this.logger.info(
-        { userId, subscriptionId: subscription.id },
+        { userId, subscriptionId: subscription.id, tier },
         'Razorpay subscription created successfully',
       );
 
@@ -235,37 +260,85 @@ export class PaymentsService {
       }
 
       case 'subscription.halted': {
-        // Payment failed repeatedly — downgrade to free
+        // Payment failed repeatedly — downgrade to free + force-reduce topics
+        const haltedMaxTopics = SUBSCRIPTION_PLANS.free.maxTopics!;
+        const haltedTrimmed = (user.subscribedTopics?.length ?? 0) > haltedMaxTopics
+          ? user.subscribedTopics!.slice(0, haltedMaxTopics)
+          : undefined;
+
         await this.userModel.findByIdAndUpdate(userId, {
           $set: {
             'subscription.plan': SubscriptionPlan.FREE,
             'subscription.status': SubscriptionStatus.EXPIRED,
             'subscription.cancelledAt': new Date(),
+            'subscription.tier': null,
             razorpaySubscriptionId: null,
+            ...(haltedTrimmed && {
+              subscribedTopics: haltedTrimmed,
+              topicSubscriptionHistory: haltedTrimmed,
+            }),
           },
         });
 
         this.logger.info(
-          { userId, event },
+          { userId, event, topicsTrimmed: !!haltedTrimmed },
           'User downgraded to Free (payment halted)',
         );
         break;
       }
 
       case 'subscription.cancelled': {
-        // User/admin cancelled — downgrade to free
+        // User/admin cancelled — downgrade to free + force-reduce topics
+        const cancelledMaxTopics = SUBSCRIPTION_PLANS.free.maxTopics!;
+        const cancelledTrimmed = (user.subscribedTopics?.length ?? 0) > cancelledMaxTopics
+          ? user.subscribedTopics!.slice(0, cancelledMaxTopics)
+          : undefined;
+
         await this.userModel.findByIdAndUpdate(userId, {
           $set: {
             'subscription.plan': SubscriptionPlan.FREE,
             'subscription.status': SubscriptionStatus.CANCELLED,
             'subscription.cancelledAt': new Date(),
+            'subscription.tier': null,
             razorpaySubscriptionId: null,
+            ...(cancelledTrimmed && {
+              subscribedTopics: cancelledTrimmed,
+              topicSubscriptionHistory: cancelledTrimmed,
+            }),
           },
         });
 
         this.logger.info(
-          { userId, event },
+          { userId, event, topicsTrimmed: !!cancelledTrimmed },
           'User downgraded to Free (subscription cancelled)',
+        );
+        break;
+      }
+
+      case 'subscription.completed': {
+        // All billing cycles completed (e.g., 1 month, 6 months, or 12 months finished)
+        // Downgrade to free + force-reduce topics — user must re-subscribe
+        const completedMaxTopics = SUBSCRIPTION_PLANS.free.maxTopics!;
+        const completedTrimmed = (user.subscribedTopics?.length ?? 0) > completedMaxTopics
+          ? user.subscribedTopics!.slice(0, completedMaxTopics)
+          : undefined;
+
+        await this.userModel.findByIdAndUpdate(userId, {
+          $set: {
+            'subscription.plan': SubscriptionPlan.FREE,
+            'subscription.status': SubscriptionStatus.EXPIRED,
+            'subscription.tier': null,
+            razorpaySubscriptionId: null,
+            ...(completedTrimmed && {
+              subscribedTopics: completedTrimmed,
+              topicSubscriptionHistory: completedTrimmed,
+            }),
+          },
+        });
+
+        this.logger.info(
+          { userId, event, topicsTrimmed: !!completedTrimmed },
+          'User downgraded to Free (subscription completed — all cycles finished)',
         );
         break;
       }
@@ -286,11 +359,15 @@ export class PaymentsService {
   /**
    * Safety-net cron: runs daily at 2 AM.
    * Finds Pro users whose endDate has passed and downgrades them to Free.
-   * This handles edge cases where a webhook was missed.
+   * Also force-reduces subscribedTopics and topicSubscriptionHistory to the
+   * free plan limit (oldest 3 topics kept).
+   * Uses aggregation pipeline update for $slice on document-level arrays.
    */
   @Cron('0 2 * * *')
   async expireOverdueSubscriptions(): Promise<void> {
     this.logger.info('Running subscription expiry cron');
+
+    const maxTopics = SUBSCRIPTION_PLANS.free.maxTopics!;
 
     const result = await this.userModel.updateMany(
       {
@@ -298,17 +375,23 @@ export class PaymentsService {
         'subscription.status': SubscriptionStatus.ACTIVE,
         'subscription.endDate': { $lt: new Date() },
       },
-      {
-        $set: {
-          'subscription.plan': SubscriptionPlan.FREE,
-          'subscription.status': SubscriptionStatus.EXPIRED,
+      [
+        {
+          $set: {
+            'subscription.plan': SubscriptionPlan.FREE,
+            'subscription.status': SubscriptionStatus.EXPIRED,
+            'subscription.tier': null,
+            razorpaySubscriptionId: null,
+            subscribedTopics: { $slice: ['$subscribedTopics', maxTopics] },
+            topicSubscriptionHistory: { $slice: ['$subscribedTopics', maxTopics] },
+          },
         },
-      },
+      ],
     );
 
     this.logger.info(
       { expiredCount: result.modifiedCount },
-      'Subscription expiry cron completed',
+      'Subscription expiry cron completed (topics trimmed to free limit)',
     );
   }
 }

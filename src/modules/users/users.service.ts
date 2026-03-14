@@ -14,14 +14,17 @@ import {
   UserDocument,
   SubscriptionPlan,
   SubscriptionStatus,
+  SubscriptionTier,
 } from '../../database/schemas/user.schema.js';
 import { Topic, TopicDocument } from '../../database/schemas/topic.schema.js';
 import { UpdateProfileDto } from './dto/update-profile.dto.js';
 import { UpdateSubscriptionsDto } from './dto/update-subscriptions.dto.js';
 import { UpdateFcmTokenDto } from './dto/update-fcm-token.dto.js';
+import { UnsubscribeTopicDto } from './dto/unsubscribe-topic.dto.js';
 import {
   ERROR_MESSAGES,
   SUBSCRIPTION_PLANS,
+  SUBSCRIPTION_TIERS,
 } from '../../common/constants/index.js';
 import { ProgressService } from '../progress/progress.service.js';
 
@@ -307,6 +310,77 @@ export class UsersService {
     }
   }
 
+  // ─────────────────────── Unsubscribe Topic ────────────────────────────────
+
+  /**
+   * Unsubscribe a user from a single topic with smart history management.
+   *
+   * - If user's progress < 10%: topic is removed from both subscribedTopics
+   *   AND topicSubscriptionHistory (slot freed for free plan limit).
+   * - If progress >= 10%: topic is removed from subscribedTopics only.
+   *   The topic permanently counts toward the free plan limit.
+   *   If clearProgress is true, the progress record is reset to zero.
+   */
+  async unsubscribeTopic(
+    userId: string,
+    dto: UnsubscribeTopicDto,
+  ): Promise<{ removedFromHistory: boolean; progressCleared: boolean }> {
+    const { topicId, clearProgress = false } = dto;
+    this.logger.info({ userId, topicId, clearProgress }, 'Unsubscribing from topic');
+
+    const user = await this.userModel.findById(userId).lean().exec();
+    if (!user) {
+      throw new NotFoundException(ERROR_MESSAGES.USER_NOT_FOUND);
+    }
+
+    // Verify the topic is actually in subscribedTopics
+    const isSubscribed = (user.subscribedTopics || []).some(
+      (id: Types.ObjectId) => id.toString() === topicId,
+    );
+    if (!isSubscribed) {
+      throw new BadRequestException('Topic is not in your subscriptions.');
+    }
+
+    // Compute progress percentage
+    const [totalQuestions, topicProgress] = await Promise.all([
+      this.progressService.countActiveQuestions(topicId),
+      this.progressService.getTopicProgress(userId, topicId),
+    ]);
+    const percentComplete =
+      totalQuestions > 0
+        ? Math.min(100, Math.round((topicProgress.questionsAnswered / totalQuestions) * 100))
+        : 0;
+
+    const topicOid = new Types.ObjectId(topicId);
+    const removedFromHistory = percentComplete < 10;
+
+    // Always remove from subscribedTopics
+    const updateOps: Record<string, unknown> = {
+      $pull: { subscribedTopics: topicOid },
+    };
+
+    // If < 10% progress: also remove from history (free slot)
+    if (removedFromHistory) {
+      (updateOps.$pull as Record<string, unknown>).topicSubscriptionHistory = topicOid;
+    }
+
+    await this.userModel.findByIdAndUpdate(userId, updateOps).exec();
+
+    // If >= 10% and user wants to clear progress: reset progress record
+    let progressCleared = false;
+    if (!removedFromHistory && clearProgress) {
+      await this.progressService.resetTopicProgress(userId, topicId);
+      progressCleared = true;
+    }
+
+    this.logger.info(
+      { userId, topicId, percentComplete, removedFromHistory, progressCleared },
+      'Topic unsubscribed successfully',
+    );
+
+    return { removedFromHistory, progressCleared };
+  }
+
   // ─────────────────────── Update FCM Token ──────────────────────────────────
 
   /**
@@ -493,9 +567,16 @@ export class UsersService {
       );
     }
 
+    // Resolve tier display info
+    const tier = (user.subscription?.tier as SubscriptionTier) || null;
+    const tierConfig = tier ? SUBSCRIPTION_TIERS[tier] : null;
+
     return {
       plan,
       status,
+      tier,
+      tierName: tierConfig?.name || null,
+      pricePerMonth: tierConfig ? tierConfig.priceInPaise / 100 : null,
       maxTopics: planConfig.maxTopics,
       currentTopicCount,
       isOverLimit,

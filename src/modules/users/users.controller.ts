@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Post,
   Patch,
   Body,
   UseGuards,
@@ -22,6 +23,7 @@ import { UpdateSubscriptionsDto } from './dto/update-subscriptions.dto.js';
 import { UpdateFcmTokenDto } from './dto/update-fcm-token.dto.js';
 import { UserResponseDto } from './dto/user-response.dto.js';
 import { SubscriptionInfoDto } from './dto/subscription-info.dto.js';
+import { UnsubscribeTopicDto } from './dto/unsubscribe-topic.dto.js';
 
 @ApiTags('Users')
 @ApiBearerAuth('JWT-auth')
@@ -119,6 +121,34 @@ export class UsersController {
   ): Promise<UserResponseDto> {
     const user = await this.usersService.updateSubscriptions(userId.toString(), dto);
     return user as unknown as UserResponseDto;
+  }
+
+  // ─────────────────── Unsubscribe Topic ────────────────────────────────────
+
+  @Post('subscriptions/unsubscribe')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Unsubscribe from a topic',
+    description:
+      'Removes a topic from the user\'s subscriptions. If progress < 10%, the topic is also removed from subscription history (slot freed). If progress >= 10%, the topic permanently counts toward the free plan limit. Optionally clear progress.',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Topic unsubscribed successfully',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Topic not in subscriptions or invalid ID',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'Not authenticated or token expired',
+  })
+  async unsubscribeTopic(
+    @CurrentUser('_id') userId: string,
+    @Body() dto: UnsubscribeTopicDto,
+  ): Promise<{ removedFromHistory: boolean; progressCleared: boolean }> {
+    return this.usersService.unsubscribeTopic(userId.toString(), dto);
   }
 
   // ─────────────────── Update FCM Token ──────────────────────────────────────

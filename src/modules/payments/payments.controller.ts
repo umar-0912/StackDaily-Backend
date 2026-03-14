@@ -1,6 +1,7 @@
 import {
   Controller,
   Post,
+  Body,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -16,6 +17,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { PaymentsService } from './payments.service.js';
 import { SubscribeResponseDto } from './dto/subscribe-response.dto.js';
+import { SubscribeRequestDto } from './dto/subscribe-request.dto.js';
 
 @ApiTags('Payments')
 @ApiBearerAuth('JWT-auth')
@@ -44,8 +46,9 @@ export class PaymentsController {
   })
   async subscribe(
     @CurrentUser('_id') userId: string,
+    @Body() dto: SubscribeRequestDto,
   ): Promise<SubscribeResponseDto> {
-    return this.paymentsService.createSubscription(userId.toString());
+    return this.paymentsService.createSubscription(userId.toString(), dto.tier);
   }
 
   // ──────────────────── Cancel ───────────────────────────────────────────────

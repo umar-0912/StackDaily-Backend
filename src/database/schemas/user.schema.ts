@@ -19,6 +19,12 @@ export enum SubscriptionStatus {
   EXPIRED = 'expired',
 }
 
+export enum SubscriptionTier {
+  MONTHLY = 'monthly',
+  HALF_YEARLY = 'half_yearly',
+  YEARLY = 'yearly',
+}
+
 export enum OtpType {
   EMAIL_VERIFICATION = 'email_verification',
   PASSWORD_RESET = 'password_reset',
@@ -165,6 +171,11 @@ export class User {
         enum: SubscriptionStatus,
         default: SubscriptionStatus.ACTIVE,
       },
+      tier: {
+        type: String,
+        enum: SubscriptionTier,
+        default: null,
+      },
       startDate: { type: Date, default: null },
       endDate: { type: Date, default: null },
       cancelledAt: { type: Date, default: null },
@@ -172,6 +183,7 @@ export class User {
     default: {
       plan: SubscriptionPlan.FREE,
       status: SubscriptionStatus.ACTIVE,
+      tier: null,
       startDate: null,
       endDate: null,
       cancelledAt: null,
@@ -181,6 +193,7 @@ export class User {
   subscription: {
     plan: SubscriptionPlan;
     status: SubscriptionStatus;
+    tier: SubscriptionTier | null;
     startDate: Date | null;
     endDate: Date | null;
     cancelledAt: Date | null;

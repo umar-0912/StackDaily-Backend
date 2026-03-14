@@ -513,6 +513,39 @@ export class ProgressService {
     }
   }
 
+  // ──────────────────── Reset Topic Progress ───────────────────────────────
+
+  /**
+   * Reset all progress fields for a user's topic back to initial state.
+   * Used when a user unsubscribes from a topic and chooses to clear progress.
+   */
+  async resetTopicProgress(userId: string, topicId: string): Promise<void> {
+    await this.progressModel.findOneAndUpdate(
+      {
+        userId: new Types.ObjectId(userId),
+        topicId: new Types.ObjectId(topicId),
+      },
+      {
+        $set: {
+          questionsAnswered: 0,
+          currentQuestionIndex: 0,
+          status: ProgressStatus.NOT_STARTED,
+          lastQuestionDate: null,
+          lastQuestionId: null,
+          lastAdvancedDate: null,
+          startedAt: null,
+          completedAt: null,
+        },
+      },
+    );
+
+    this.logger.log({
+      msg: 'Topic progress reset',
+      userId,
+      topicId,
+    });
+  }
+
   // ──────────────────── Private Helpers ───────────────────────────────────
 
   /**

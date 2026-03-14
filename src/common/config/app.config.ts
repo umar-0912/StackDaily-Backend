@@ -35,7 +35,9 @@ export const validationSchema = Joi.object({
   RAZORPAY_KEY_ID: Joi.string().optional().default(''),
   RAZORPAY_KEY_SECRET: Joi.string().optional().default(''),
   RAZORPAY_WEBHOOK_SECRET: Joi.string().optional().default(''),
-  RAZORPAY_PLAN_ID: Joi.string().optional().default(''),
+  RAZORPAY_PLAN_ID_MONTHLY: Joi.string().optional().default(''),
+  RAZORPAY_PLAN_ID_HALF_YEARLY: Joi.string().optional().default(''),
+  RAZORPAY_PLAN_ID_YEARLY: Joi.string().optional().default(''),
 
   // Email — Brevo (optional — email features disabled without it)
   BREVO_API_KEY: Joi.string().optional().allow('').default(''),
@@ -75,7 +77,9 @@ export const razorpayConfig = registerAs('razorpay', () => ({
   keyId: process.env.RAZORPAY_KEY_ID,
   keySecret: process.env.RAZORPAY_KEY_SECRET,
   webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET,
-  planId: process.env.RAZORPAY_PLAN_ID,
+  planIdMonthly: process.env.RAZORPAY_PLAN_ID_MONTHLY,
+  planIdHalfYearly: process.env.RAZORPAY_PLAN_ID_HALF_YEARLY,
+  planIdYearly: process.env.RAZORPAY_PLAN_ID_YEARLY,
 }));
 
 export const emailConfig = registerAs('email', () => ({
