@@ -652,9 +652,10 @@ export class AuthService {
     }
 
     // 4. Create new user (Google-only, no password, auto-verified)
-    const googleName = payload.name || payload.email.split('@')[0];
+    const googleName =
+      payload.name?.trim() || payload.email.split('@')[0] || 'User';
     const username = await this.generateUniqueUsername(
-      payload.name,
+      googleName,
       payload.email,
     );
 
