@@ -631,6 +631,11 @@ export class AuthService {
       // Link Google account to existing email+password user
       user.googleId = payload.sub;
       user.isEmailVerified = true; // Google verifies email
+      // Backfill name if missing (e.g. legacy users without name)
+      if (!user.name?.trim()) {
+        user.name =
+          payload.name?.trim() || payload.email.split('@')[0] || 'User';
+      }
       await user.save();
 
       this.logger.info(
