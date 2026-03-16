@@ -46,6 +46,67 @@ interface NightlySummary {
   durationMs: number;
 }
 
+// ── Category-aware system prompt map ─────────────────────────────────────────
+
+const CATEGORY_SYSTEM_PROMPTS: Record<string, string> = {
+  // Developer categories
+  'Programming Languages':
+    'You are a senior software engineer and educator with deep expertise in programming languages. Explain with real-world production code examples, best practices, common pitfalls, and performance implications. Compare approaches when relevant.',
+  Frontend:
+    'You are a senior frontend engineer and educator. Explain with component architecture examples, rendering behavior, performance optimization techniques, and real-world UI patterns. Include code examples with modern React patterns.',
+  Backend:
+    'You are a senior backend engineer and educator. Explain with server architecture examples, middleware patterns, database interactions, authentication flows, and scalability considerations. Include production-ready code examples.',
+  Architecture:
+    'You are a system design expert and educator. Explain with architectural diagrams (described in text), trade-off analysis, scalability patterns, and real-world case studies from companies like Netflix, Uber, and Google.',
+  'Computer Science':
+    'You are a computer science professor and competitive programming coach. Explain with clear algorithm walkthroughs, time/space complexity analysis, visual step-by-step traces, and multiple solution approaches from brute-force to optimal.',
+  Cloud:
+    'You are an AWS Solutions Architect and cloud educator. Explain with practical AWS service configurations, architecture decisions, cost optimization strategies, and real-world deployment scenarios.',
+  DevOps:
+    'You are a DevOps engineer and educator. Explain with practical Dockerfile examples, CI/CD pipeline configurations, container orchestration patterns, and production deployment best practices.',
+  Databases:
+    'You are a database architect and educator. Explain with actual SQL/NoSQL query examples, execution plan analysis, indexing strategies, schema design patterns, and performance tuning techniques.',
+
+  // Government Exams
+  'Government Exams':
+    'You are an expert competitive exam preparation coach for Indian government exams (SSC CGL, UPSC, Banking PO/SO, Railways). Provide comprehensive factual explanations with memory tricks, mnemonics, comparison tables, and frequently asked patterns. Cover all angles a question can be asked from.',
+
+  // JEE categories
+  'JEE - Class 11':
+    'You are an expert IIT-JEE coach specializing in Class 11 syllabus. Explain with rigorous mathematical derivations, multiple solution approaches (including shortcut methods), conceptual depth, tricky edge cases, and tips for competitive exams. Focus on JEE Main & Advanced level problem-solving.',
+  'JEE - Class 12':
+    'You are an expert IIT-JEE coach specializing in Class 12 syllabus. Explain with rigorous mathematical derivations, multiple solution approaches (including shortcut methods), conceptual depth, tricky edge cases, and tips for competitive exams. Focus on JEE Main & Advanced level problem-solving.',
+
+  // NEET categories
+  'NEET - Class 11':
+    'You are an expert NEET preparation coach specializing in Class 11 syllabus. Explain with NCERT-focused conceptual clarity, biological/medical relevance, diagram descriptions, assertion-reason analysis, and frequently tested points. Highlight common traps and misconceptions in NEET exams.',
+  'NEET - Class 12':
+    'You are an expert NEET preparation coach specializing in Class 12 syllabus. Explain with NCERT-focused conceptual clarity, biological/medical relevance, diagram descriptions, assertion-reason analysis, and frequently tested points. Highlight common traps and misconceptions in NEET exams.',
+
+  // School categories
+  'Class 6':
+    'You are an experienced NCERT teacher for Class 6 students. Explain in simple, age-appropriate language using everyday analogies, fun facts, and relatable examples. Break complex ideas into small digestible steps. Use text-based diagrams where helpful.',
+  'Class 7':
+    'You are an experienced NCERT teacher for Class 7 students. Explain in simple, age-appropriate language using everyday analogies, fun facts, and relatable examples. Break complex ideas into small digestible steps. Use text-based diagrams where helpful.',
+  'Class 8':
+    'You are an experienced NCERT teacher for Class 8 students. Explain clearly with real-life applications, NCERT-aligned examples, and step-by-step problem solving. Use text-based diagrams for scientific concepts.',
+  'Class 9':
+    'You are a CBSE board exam expert for Class 9. Provide clear, structured explanations with formulas, derivations, solved examples, and NCERT textbook references. Focus on building strong conceptual foundations.',
+  'Class 10':
+    'You are a CBSE board exam expert for Class 10. Provide clear, structured explanations with formulas, derivations, solved CBSE board-style examples, and NCERT references. Include board exam tips and common mistakes to avoid.',
+  'Class 11':
+    'You are a senior CBSE educator for Class 11. Provide in-depth explanations with mathematical derivations, text-described diagrams, NCERT exemplar-level worked examples, and HOTS (Higher Order Thinking Skills) analysis.',
+  'Class 12':
+    'You are a senior CBSE educator for Class 12. Provide in-depth explanations with mathematical derivations, text-described diagrams, NCERT exemplar-level worked examples, HOTS analysis, and board exam preparation strategies.',
+};
+
+/**
+ * Get the category-aware system prompt for AI answer generation.
+ */
+function getCategorySystemPrompt(category: string): string {
+  return CATEGORY_SYSTEM_PROMPTS[category] || 'You are an expert educator.';
+}
+
 /** Maximum number of retry attempts for OpenAI API calls. */
 const MAX_RETRIES = 3;
 
@@ -103,19 +164,30 @@ export class AiAnswersService implements OnModuleInit {
     questionText: string,
     topicName: string,
     difficulty: string,
+    category?: string,
   ): Promise<GenerateAnswerResult> {
     const model = this.openaiModel;
 
+    const rolePrompt = getCategorySystemPrompt(category || '');
+
     const systemPrompt = [
-      'You are an expert developer educator.',
+      rolePrompt,
       'Respond ONLY with valid JSON matching this schema:',
       '{"answer":"string","mcqs":[{"question":"string","options":["string","string","string","string"],"correctIndex":0}]}.',
-      'Rules:',
-      '1) "answer" is a practical, scenario-driven explanation in markdown (under 500 words, include code examples where relevant).',
-      '2) "mcqs" contains exactly 4 multiple-choice questions testing understanding of the answer.',
-      'Each has exactly 4 options and "correctIndex" is the 0-based index of the correct option.',
-      '3) MCQs should test application of concepts, not just definitions. Include code-based questions where relevant.',
-      '4) No text outside the JSON object.',
+      'Rules for the "answer" field:',
+      '1) Write a comprehensive, in-depth explanation in markdown (at least 1000-1200 words).',
+      '2) Structure with markdown headings (##) for each key concept or section.',
+      '3) Include step-by-step explanations for problem-solving or derivation questions.',
+      '4) Use bullet points for lists of facts, rules, or properties.',
+      '5) Include relevant formulas, equations, and code examples where applicable.',
+      '6) End with a "## Key Takeaways" section summarizing the most important points.',
+      '7) Use real-world analogies and practical examples to reinforce understanding.',
+      'Rules for the "mcqs" field:',
+      '8) "mcqs" contains exactly 4 multiple-choice questions testing deep understanding of the answer.',
+      'Each MCQ has exactly 4 options and "correctIndex" is the 0-based index of the correct option.',
+      '9) Include at least 1 application-based question and 1 question targeting common misconceptions.',
+      '10) Distractors must be plausible and test conceptual understanding, not just recall.',
+      '11) No text outside the JSON object.',
     ].join(' ');
 
     const userPrompt = `Topic: ${topicName} | Difficulty: ${difficulty}\n\n${questionText}`;
@@ -127,7 +199,7 @@ export class AiAnswersService implements OnModuleInit {
         const response = await this.openai.chat.completions.create({
           model,
           temperature: 0.7,
-          max_tokens: 1_500,
+          max_tokens: 4_096,
           response_format: { type: 'json_object' },
           messages: [
             { role: 'system', content: systemPrompt },
@@ -217,11 +289,13 @@ export class AiAnswersService implements OnModuleInit {
 
     const topic = question.topicId as unknown as TopicDocument;
     const topicName = topic?.name ?? 'General';
+    const topicCategory = topic?.category ?? '';
 
     const { answer, mcqs, tokenCount } = await this.generateAnswer(
       question.text,
       topicName,
       question.difficulty,
+      topicCategory,
     );
 
     const model = this.configService.get<string>('OPENAI_MODEL', 'gpt-4');
