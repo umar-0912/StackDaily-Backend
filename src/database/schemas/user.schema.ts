@@ -35,6 +35,11 @@ export enum AuthProvider {
   GOOGLE = 'google',
 }
 
+export enum PaymentProvider {
+  RAZORPAY = 'razorpay',
+  STRIPE = 'stripe',
+}
+
 @Schema({
   timestamps: true,
   toJSON: {
@@ -204,6 +209,15 @@ export class User {
 
   @Prop({ type: String, default: null, index: true })
   razorpaySubscriptionId: string | null;
+
+  @Prop({ type: String, default: null, index: true })
+  stripeCustomerId: string | null;
+
+  @Prop({ type: String, default: null, index: true })
+  stripeSubscriptionId: string | null;
+
+  @Prop({ type: String, enum: PaymentProvider, default: null })
+  paymentProvider: PaymentProvider | null;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

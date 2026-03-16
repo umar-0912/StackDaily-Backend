@@ -6,6 +6,7 @@ export {
   openaiConfig,
   fcmConfig,
   razorpayConfig,
+  stripeConfig,
   emailConfig,
   googleConfig,
 } from './app.config.js';

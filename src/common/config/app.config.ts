@@ -39,6 +39,14 @@ export const validationSchema = Joi.object({
   RAZORPAY_PLAN_ID_HALF_YEARLY: Joi.string().optional().default(''),
   RAZORPAY_PLAN_ID_YEARLY: Joi.string().optional().default(''),
 
+  // Stripe (optional — international payments disabled without it)
+  STRIPE_SECRET_KEY: Joi.string().optional().default(''),
+  STRIPE_PUBLISHABLE_KEY: Joi.string().optional().default(''),
+  STRIPE_WEBHOOK_SECRET: Joi.string().optional().default(''),
+  STRIPE_PRICE_ID_MONTHLY: Joi.string().optional().default(''),
+  STRIPE_PRICE_ID_HALF_YEARLY: Joi.string().optional().default(''),
+  STRIPE_PRICE_ID_YEARLY: Joi.string().optional().default(''),
+
   // Email — Brevo (optional — email features disabled without it)
   BREVO_API_KEY: Joi.string().optional().allow('').default(''),
   EMAIL_FROM_NAME: Joi.string().optional().default('StackDaily'),
@@ -80,6 +88,15 @@ export const razorpayConfig = registerAs('razorpay', () => ({
   planIdMonthly: process.env.RAZORPAY_PLAN_ID_MONTHLY,
   planIdHalfYearly: process.env.RAZORPAY_PLAN_ID_HALF_YEARLY,
   planIdYearly: process.env.RAZORPAY_PLAN_ID_YEARLY,
+}));
+
+export const stripeConfig = registerAs('stripe', () => ({
+  secretKey: process.env.STRIPE_SECRET_KEY,
+  publishableKey: process.env.STRIPE_PUBLISHABLE_KEY,
+  webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
+  priceIdMonthly: process.env.STRIPE_PRICE_ID_MONTHLY,
+  priceIdHalfYearly: process.env.STRIPE_PRICE_ID_HALF_YEARLY,
+  priceIdYearly: process.env.STRIPE_PRICE_ID_YEARLY,
 }));
 
 export const emailConfig = registerAs('email', () => ({

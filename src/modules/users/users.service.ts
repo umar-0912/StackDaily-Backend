@@ -15,6 +15,7 @@ import {
   SubscriptionPlan,
   SubscriptionStatus,
   SubscriptionTier,
+  PaymentProvider,
 } from '../../database/schemas/user.schema.js';
 import { Topic, TopicDocument } from '../../database/schemas/topic.schema.js';
 import { UpdateProfileDto } from './dto/update-profile.dto.js';
@@ -25,6 +26,7 @@ import {
   ERROR_MESSAGES,
   SUBSCRIPTION_PLANS,
   SUBSCRIPTION_TIERS,
+  STRIPE_SUBSCRIPTION_TIERS,
 } from '../../common/constants/index.js';
 import { ProgressService } from '../progress/progress.service.js';
 
@@ -567,16 +569,37 @@ export class UsersService {
       );
     }
 
-    // Resolve tier display info
+    // Resolve tier display info based on payment provider
     const tier = (user.subscription?.tier as SubscriptionTier) || null;
-    const tierConfig = tier ? SUBSCRIPTION_TIERS[tier] : null;
+    const userPaymentProvider = (user as any).paymentProvider as PaymentProvider | null;
+    const isStripe = userPaymentProvider === PaymentProvider.STRIPE;
+
+    let tierName: string | null = null;
+    let pricePerMonth: number | null = null;
+    let currency: string;
+
+    if (tier && isStripe) {
+      const stripeTierConfig = STRIPE_SUBSCRIPTION_TIERS[tier];
+      tierName = stripeTierConfig.name;
+      pricePerMonth = stripeTierConfig.priceInCents / 100;
+      currency = 'USD';
+    } else if (tier) {
+      const razorpayTierConfig = SUBSCRIPTION_TIERS[tier];
+      tierName = razorpayTierConfig.name;
+      pricePerMonth = razorpayTierConfig.priceInPaise / 100;
+      currency = 'INR';
+    } else {
+      currency = 'INR';
+    }
 
     return {
       plan,
       status,
       tier,
-      tierName: tierConfig?.name || null,
-      pricePerMonth: tierConfig ? tierConfig.priceInPaise / 100 : null,
+      tierName,
+      pricePerMonth,
+      currency,
+      paymentProvider: userPaymentProvider || null,
       maxTopics: planConfig.maxTopics,
       currentTopicCount,
       isOverLimit,

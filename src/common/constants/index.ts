@@ -132,3 +132,31 @@ export const SUBSCRIPTION_TIERS = {
     savingsPercent: 50,
   },
 } as const;
+
+/**
+ * Stripe subscription tier configuration for international payments.
+ * Prices in cents (USD).
+ */
+export const STRIPE_SUBSCRIPTION_TIERS = {
+  monthly: {
+    name: 'Monthly',
+    priceInCents: 100,
+    billingCycleDays: 30,
+    totalCount: 1,
+    savingsPercent: 0,
+  },
+  half_yearly: {
+    name: 'Half-Yearly',
+    priceInCents: 75,
+    billingCycleDays: 30,
+    totalCount: 6,
+    savingsPercent: 25,
+  },
+  yearly: {
+    name: 'Yearly',
+    priceInCents: 50,
+    billingCycleDays: 30,
+    totalCount: 12,
+    savingsPercent: 50,
+  },
+} as const;

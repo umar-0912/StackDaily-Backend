@@ -15,6 +15,7 @@ import {
   openaiConfig,
   fcmConfig,
   razorpayConfig,
+  stripeConfig,
   emailConfig,
   googleConfig,
 } from './common/config/index.js';
@@ -36,7 +37,7 @@ import { EmailModule } from './modules/email/email.module.js';
     // ─── Configuration ──────────────────────────────────────────
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, databaseConfig, jwtConfig, openaiConfig, fcmConfig, razorpayConfig, emailConfig, googleConfig],
+      load: [appConfig, databaseConfig, jwtConfig, openaiConfig, fcmConfig, razorpayConfig, stripeConfig, emailConfig, googleConfig],
       validationSchema,
       validationOptions: {
         abortEarly: false,

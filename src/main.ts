@@ -15,12 +15,15 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
 
   // ─── Body Size Limits ────────────────────────────────────────
-  // The verify callback captures the raw body for Razorpay webhook signature verification
+  // The verify callback captures the raw body for Razorpay and Stripe webhook signature verification
   app.use(
     json({
       limit: '1mb',
       verify: (req: any, _res, buf) => {
-        if (req.url?.includes('/payments/webhook')) {
+        if (
+          req.url?.includes('/payments/webhook') ||
+          req.url?.includes('/payments/stripe-webhook')
+        ) {
           req.rawBody = buf.toString();
         }
       },

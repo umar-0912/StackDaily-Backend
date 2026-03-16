@@ -48,7 +48,11 @@ export class PaymentsController {
     @CurrentUser('_id') userId: string,
     @Body() dto: SubscribeRequestDto,
   ): Promise<SubscribeResponseDto> {
-    return this.paymentsService.createSubscription(userId.toString(), dto.tier);
+    return this.paymentsService.createSubscription(
+      userId.toString(),
+      dto.tier,
+      dto.provider,
+    );
   }
 
   // ──────────────────── Cancel ───────────────────────────────────────────────

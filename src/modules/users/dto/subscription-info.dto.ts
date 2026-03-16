@@ -31,11 +31,25 @@ export class SubscriptionInfoDto {
   tierName: string | null;
 
   @ApiProperty({
-    description: 'Price per month in rupees (null for free plan)',
+    description: 'Price per month in currency units (null for free plan)',
     example: null,
     nullable: true,
   })
   pricePerMonth: number | null;
+
+  @ApiProperty({
+    description: 'Currency code (INR for Razorpay, USD for Stripe)',
+    example: 'INR',
+  })
+  currency: string;
+
+  @ApiProperty({
+    description: 'Payment provider used for the subscription (null for free plan)',
+    enum: ['razorpay', 'stripe'],
+    example: null,
+    nullable: true,
+  })
+  paymentProvider: string | null;
 
   @ApiProperty({
     description: 'Maximum topics allowed (null = unlimited)',
