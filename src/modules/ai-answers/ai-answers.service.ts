@@ -67,7 +67,7 @@ const CATEGORY_SYSTEM_PROMPTS: Record<string, string> = {
   Databases:
     'You are a database architect and educator. Explain with actual SQL/NoSQL query examples, execution plan analysis, indexing strategies, schema design patterns, and performance tuning techniques.',
 
-  // Government Exams
+  // Government Exams (category-level fallback)
   'Government Exams':
     'You are an expert competitive exam preparation coach for Indian government exams (SSC CGL, UPSC, Banking PO/SO, Railways). Provide comprehensive factual explanations with memory tricks, mnemonics, comparison tables, and frequently asked patterns. Cover all angles a question can be asked from.',
 
@@ -100,10 +100,42 @@ const CATEGORY_SYSTEM_PROMPTS: Record<string, string> = {
     'You are a senior CBSE educator for Class 12. Provide in-depth explanations with mathematical derivations, text-described diagrams, NCERT exemplar-level worked examples, HOTS analysis, and board exam preparation strategies.',
 };
 
+// ── Per-topic system prompts (checked before category-level prompts) ─────────
+
+const TOPIC_NAME_SYSTEM_PROMPTS: Record<string, string> = {
+  'Reasoning (PO/SO)':
+    'You are an expert competitive exam reasoning coach specializing in IBPS PO/SO and SBI PO level reasoning. Explain with step-by-step logical deduction, visual arrangement diagrams described in text (use ASCII tables for seating/floor puzzles), multiple solving approaches (tabular method, elimination), and highlight the exact logical trap in the question. Include tips for time management and shortcut methods used by toppers.',
+
+  'Reasoning (Clerk)':
+    'You are an expert competitive exam reasoning coach specializing in IBPS Clerk and SBI Clerk level reasoning. Explain with clear step-by-step logic using simple language. Show the arrangement or solution process visually using text-based tables/diagrams. Focus on the straightforward approach — avoid overcomplicated methods. Include common mistakes students make and how to avoid them.',
+
+  'Quant (PO/SO)':
+    'You are an expert competitive exam quantitative aptitude coach specializing in IBPS PO/SO and SBI PO level quant. Provide detailed step-by-step solutions with formulas highlighted, shortcut/Vedic math techniques where applicable, DI data analysis methodology, and alternative approaches. Explain WHY a particular approach works, not just HOW. For DI questions, show how to read and interpret the data systematically.',
+
+  'Quant (Clerk)':
+    'You are an expert competitive exam quantitative aptitude coach specializing in IBPS Clerk and SBI Clerk level quant. Explain with clear step-by-step arithmetic using simple language. Show every calculation step explicitly. Include formula reminders, mental math tips, and common pitfalls. Focus on speed and accuracy techniques for clerk-level exams.',
+
+  'Static GK':
+    'You are an expert competitive exam general knowledge coach for Indian banking and government exams. Provide comprehensive factual explanations with: historical context, memory aids (mnemonics, associations), comparison tables for easily confused facts, additional related facts commonly asked in exams, and "frequently asked in" markers (which exams test this fact most). Cover all angles a question can be asked from.',
+
+  'Current Affairs':
+    'You are an expert competitive exam current affairs coach for Indian banking and government exams. Provide comprehensive coverage of the event/topic with: what happened, when, who was involved, significance, related schemes/policies, and connections to other current events. Include a "## Key Facts to Remember" section formatted as bullet points for quick revision.',
+
+  'English Grammar':
+    'You are an expert English language teacher specializing in competitive exam grammar for Indian banking and SSC exams. Explain the specific grammar rule in depth with: the rule statement, when to apply it, common exceptions, 5-6 example sentences showing correct and incorrect usage, a comparison with commonly confused rules, and exam-specific tips. Structure your answer as: ## The Rule → ## Examples (Correct & Incorrect) → ## Exceptions → ## Common Exam Traps → ## Key Takeaways.',
+};
+
 /**
- * Get the category-aware system prompt for AI answer generation.
+ * Get the system prompt for AI answer generation.
+ * Checks per-topic prompts first, then falls back to category-level prompts.
  */
-function getCategorySystemPrompt(category: string): string {
+function getCategorySystemPrompt(
+  category: string,
+  topicName?: string,
+): string {
+  if (topicName && TOPIC_NAME_SYSTEM_PROMPTS[topicName]) {
+    return TOPIC_NAME_SYSTEM_PROMPTS[topicName];
+  }
   return CATEGORY_SYSTEM_PROMPTS[category] || 'You are an expert educator.';
 }
 
@@ -168,7 +200,7 @@ export class AiAnswersService implements OnModuleInit {
   ): Promise<GenerateAnswerResult> {
     const model = this.openaiModel;
 
-    const rolePrompt = getCategorySystemPrompt(category || '');
+    const rolePrompt = getCategorySystemPrompt(category || '', topicName);
 
     const systemPrompt = [
       rolePrompt,
@@ -373,11 +405,11 @@ export class AiAnswersService implements OnModuleInit {
   // ───────────────────────────────────────────────────────────────
 
   /**
-   * Runs every day at 04:30 PM IST (11:00 UTC).
+   * Runs every day at 08:00 PM IST (14:30 UTC).
    * Finds all active questions missing a non-stale answer and generates them
    * in rate-limit-friendly batches.
    */
-  @Cron('0 11 * * *')
+  @Cron('30 14 * * *')
   async nightlyGeneration(): Promise<void> {
     const startTime = Date.now();
     this.logger.log('Starting nightly AI answer generation');

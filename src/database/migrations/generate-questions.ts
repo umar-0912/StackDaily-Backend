@@ -1,15 +1,20 @@
 /**
  * Migration: AI-generate high-quality questions for new topics.
  *
- * Generates 50 questions per topic (15 beginner, 20 intermediate, 15 advanced)
- * using OpenAI gpt-4o-mini with category-specific prompts designed for exam-level quality.
+ * Generates questions per topic using OpenAI gpt-4o-mini with category-specific
+ * and topic-specific prompts designed for exam-level quality.
+ *
+ * Default: 50 questions per topic (15 beginner, 20 intermediate, 15 advanced).
+ * Government exam topics have custom counts (100 or 120) and dedicated prompts.
  *
  * Usage:
  *   MONGODB_URI="..." OPENAI_API_KEY="..." npx ts-node -r tsconfig-paths/register src/database/migrations/generate-questions.ts
  *
  * Optional flags:
- *   --topic <slug>        Generate for a single topic only (e.g. --topic jee-physics)
+ *   --topic <slug>        Generate for a single topic only (e.g. --topic reasoning-po-so)
  *   --dry-run             Print prompts without calling OpenAI or writing to DB
+ *   --published           Process published topics instead of unpublished
+ *   --force               Bypass existing question count check (regenerate)
  */
 
 import mongoose from 'mongoose';
@@ -30,8 +35,229 @@ if (!OPENAI_API_KEY) {
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 const MODEL = 'gpt-4o-mini';
 const DELAY_MS = 2_000;
+const MAX_SUB_BATCH_SIZE = 20; // Never ask for more than 20 questions in one API call
 
-// ── Category-specific prompt instructions ──────────────────────────────
+// ── Per-topic question count overrides ───────────────────────────────────────
+
+const DEFAULT_QUESTION_COUNT = 50;
+
+const TOPIC_QUESTION_COUNTS: Record<string, number> = {
+  'static-gk': 100,
+  'current-affairs': 100,
+  'reasoning-po-so': 100,
+  'reasoning-clerk': 100,
+  'quant-po-so': 100,
+  'quant-clerk': 100,
+  'english-grammar': 120,
+};
+
+// ── Per-topic difficulty distribution ────────────────────────────────────────
+
+interface DifficultyBatch {
+  difficulty: 'beginner' | 'intermediate' | 'advanced';
+  count: number;
+}
+
+const DEFAULT_BATCHES: DifficultyBatch[] = [
+  { difficulty: 'beginner', count: 15 },
+  { difficulty: 'intermediate', count: 20 },
+  { difficulty: 'advanced', count: 15 },
+];
+
+function getBatches(slug: string, totalCount: number): DifficultyBatch[] {
+  if (slug === 'english-grammar') {
+    // 120 questions: broader intermediate band for grammar rules
+    return [
+      { difficulty: 'beginner', count: 30 },
+      { difficulty: 'intermediate', count: 50 },
+      { difficulty: 'advanced', count: 40 },
+    ];
+  }
+
+  if (totalCount === 100) {
+    return [
+      { difficulty: 'beginner', count: 30 },
+      { difficulty: 'intermediate', count: 40 },
+      { difficulty: 'advanced', count: 30 },
+    ];
+  }
+
+  return DEFAULT_BATCHES;
+}
+
+// ── Per-topic prompt overrides (checked BEFORE category prompts) ─────────────
+
+const TOPIC_PROMPTS: Record<string, string> = {
+  'static-gk': `You are an expert question setter for Indian banking and government exams (IBPS PO/SO, SBI PO, IBPS Clerk, SSC CGL, UPSC Prelims).
+
+Rules:
+- Generate questions that match ACTUAL previous year papers from IBPS, SBI, SSC CGL, and UPSC Prelims.
+- Cover these specific areas with equal distribution:
+  * Indian History: ancient civilizations, Mughal period, British era, freedom movement, post-independence events
+  * Indian Geography: rivers, mountain passes, states & capitals, climate zones, agricultural regions, national parks
+  * Indian Polity: Constitutional articles & amendments, fundamental rights & duties, parliamentary procedures, Panchayati Raj, judiciary structure
+  * Indian Economy: Five Year Plans, NITI Aayog, fiscal policy, RBI functions, GDP/GNP concepts, poverty alleviation schemes
+  * General Science: physics concepts in daily life, human body systems, diseases & nutrition, scientific instruments, space missions (ISRO)
+  * Awards & Honors: Bharat Ratna recipients, Padma awards, Nobel laureates (India connection), Dronacharya/Arjuna awards
+  * Constitutional & Statutory Bodies: Election Commission, CAG, UPSC, Finance Commission, NHRC
+  * Important Days & Events: national and international observance days commonly asked in exams
+- Distractors must be CLOSE and plausible — use names/dates/facts from the same domain.
+- Avoid trivially easy questions. Every question should require genuine recall, not obvious elimination.
+- Beginner: single-fact recall with tricky distractors.
+- Intermediate: questions requiring knowledge of connections (e.g., "Which constitutional amendment introduced Panchayati Raj?").
+- Advanced: multi-fact synthesis, "which of the following statements is/are correct" style, or matching pairs.
+- Questions must be self-contained (no "as per recent news" references for Static GK).`,
+
+  'current-affairs': `You are an expert question setter for Indian banking and government exams (IBPS PO/SO, SBI PO, IBPS Clerk, SSC CGL) — Current Affairs section.
+
+Rules:
+- Generate questions based on important events from 2024-2025 and early 2026.
+- Cover these areas with balanced distribution:
+  * Government schemes & policies: new launches, expansions, budget highlights
+  * International summits & organizations: G20, BRICS, UN sessions, bilateral agreements
+  * Appointments: RBI Governor, Supreme Court judges, heads of international bodies, state governors
+  * Awards & honors: Nobel Prize 2024-2025, Booker Prize, national awards, sports awards
+  * Sports: ICC events, Olympics, Asian Games, Commonwealth Games, Indian sports achievements
+  * Defense: military exercises (name + countries), defense acquisitions, DRDO milestones
+  * Economy: RBI policy rates, new financial regulations, stock market milestones, PSU disinvestment
+  * Science & Technology: ISRO missions, global space events, AI/tech milestones, medical breakthroughs
+  * Books & Authors: important new releases by Indian authors, autobiographies
+  * Obituaries: notable personalities who passed away (commonly asked in banking exams)
+- Style must match IBPS/SBI exam pattern: factual, concise, one-correct-answer.
+- Distractors must be from the SAME time period and domain (e.g., if the answer is an appointment in July 2024, distractors should be other appointments from similar timeframes).
+- No opinion-based or subjective questions. Every answer must be verifiable.
+- Beginner: direct fact recall (Who was appointed as...? Which country hosted...?)
+- Intermediate: connecting two facts (Which organization launched X scheme during Y summit?)
+- Advanced: "which of the following statements is/are correct" style with 2-3 statements about a single event.`,
+
+  'reasoning-po-so': `You are an expert question setter for IBPS PO, SBI PO, RBI Grade B, and NABARD — Reasoning Ability section (officer-level difficulty).
+
+Rules:
+- Generate questions at IBPS PO Prelims + Mains difficulty level. PO-level reasoning is SIGNIFICANTLY harder than Clerk-level.
+- Cover these specific topic areas:
+  * Seating Arrangement (Linear & Circular): 7-8 persons, 2+ variables, complex conditions with negations
+  * Puzzles: Floor-based (7-8 floors), scheduling, box-based, day-based with 3+ parameters
+  * Syllogisms: 3-4 statements with "some", "all", "no", "some not" — include possibility-based conclusions
+  * Coding-Decoding: pattern-based (letter shifting, word rearrangement), new pattern types seen in recent exams
+  * Blood Relations: 5+ person family trees, mixed gender clues, coded blood relations
+  * Direction & Distance: multi-step movement with turns, combined with blood relations
+  * Inequalities: coded inequalities (symbols replacing >, <, =), chain inequalities with conclusions
+  * Input-Output: number/word rearrangement machines, multi-step transformations
+  * Order & Ranking: combined ranking from top and bottom, more/less than conditions
+  * Data Sufficiency: "which statement(s) are sufficient to answer the question?"
+  * Critical Reasoning: statement-assumption, statement-conclusion, cause-effect, course of action
+- Each question must be SELF-CONTAINED — include ALL clues/data within the question text itself.
+- For puzzles and seating arrangements: present the full set of conditions, then ask ONE specific question about the arrangement. Do NOT reference "the paragraph above" — embed conditions in the question.
+- PO-level differentiators: more persons, more variables, negative conditions ("X does NOT sit adjacent to Y"), possibility-based reasoning.
+- Distractors must be values that would result from misreading ONE condition or making one logical error.
+- Beginner: 4-5 person arrangements, simple syllogisms, direct inequalities.
+- Intermediate: 6-7 person arrangements with 2 variables, coded blood relations, input-output.
+- Advanced: 8-person complex puzzles with 3 variables, possibility-based syllogisms, data sufficiency with 3 statements, critical reasoning.`,
+
+  'reasoning-clerk': `You are an expert question setter for IBPS Clerk, SBI Clerk, and RRB Clerk — Reasoning Ability section (clerical-level difficulty).
+
+Rules:
+- Generate questions at IBPS Clerk Prelims + Mains difficulty level. Clerk-level reasoning is MODERATE — solvable in 45-60 seconds per question.
+- Cover these specific topic areas:
+  * Seating Arrangement (Linear & Circular): 5-6 persons, 1-2 variables, straightforward conditions
+  * Puzzles: Floor-based (5-6 floors), simple box/day-based with 2 parameters
+  * Syllogisms: 2-3 statements with basic conclusions (no possibility-based at beginner level)
+  * Coding-Decoding: simple letter shift patterns, word-to-number coding
+  * Blood Relations: 3-4 person family trees, direct relationship questions
+  * Direction & Distance: 3-4 step movements, basic compass directions
+  * Inequalities: direct symbol inequalities (>, <, =, >=, <=), simple chain conclusions
+  * Alphabetical Series: letter position, alphabetical order, middle letter questions
+  * Number Series: find the missing number, simple patterns (arithmetic, geometric, alternating)
+  * Order & Ranking: simple top-bottom ranking with 2-3 conditions
+- Each question must be SELF-CONTAINED — include ALL clues/data within the question text.
+- Clerk-level characteristics: fewer persons in arrangements, fewer variables, no negation-heavy conditions, more direct logic.
+- Questions should be solvable with straightforward step-by-step logic, NOT requiring complex case analysis.
+- Distractors must be plausible but incorrect — values from partial solving or misreading one condition.
+- Beginner: alphabet/number series, direct blood relations, 4-person linear seating.
+- Intermediate: 5-person circular seating, coded inequalities, simple puzzles.
+- Advanced: 6-person arrangements with 2 variables, multi-step direction problems, basic syllogisms with some/all/no.`,
+
+  'quant-po-so': `You are an expert question setter for IBPS PO, SBI PO, RBI Grade B, and NABARD — Quantitative Aptitude section (officer-level difficulty).
+
+Rules:
+- Generate questions at IBPS PO Prelims + Mains difficulty level. PO-level quant is SIGNIFICANTLY harder than Clerk-level with multi-step calculations and data interpretation.
+- Cover these specific topic areas with balanced distribution:
+  * Data Interpretation (DI): bar graphs, line graphs, pie charts, tables, radar charts, caselet (paragraph-based) — 30% of questions should be DI
+  * Number Series: complex patterns (prime-based, mixed operations, alternate series, wrong number detection)
+  * Simplification & Approximation: BODMAS with large numbers, requires estimation skills
+  * Quadratic Equations: compare roots of two equations, determine relationship (x > y, x < y, etc.)
+  * Arithmetic:
+    - Percentage, Profit & Loss: successive discounts, marked price, partnership with changing ratios
+    - Ratio & Proportion: compound ratios, mixing problems with replacement
+    - Time & Work: pipes & cisterns, efficiency-based, alternating work, A+B then B+C scenarios
+    - Time, Speed & Distance: trains, boats & streams, relative speed, circular track meetings
+    - Simple & Compound Interest: difference between SI and CI, installment-based, mixed principal
+    - Mensuration: combined 2D/3D shapes, hemisphere + cylinder combos, percentage change in dimensions
+    - Probability: cards, dice, balls in bags, conditional probability
+    - Permutation & Combination: arrangement with restrictions, selection with conditions
+  * Data Sufficiency: "which statement(s) are sufficient to determine the answer?"
+- For DI questions: embed the complete data set (table or textual description of graph data) within the question. Never reference an external figure.
+- PO-level differentiators: multi-step DI (percentage change of percentage change), complex number series, quadratic equations, data sufficiency, probability + P&C.
+- Calculations must be realistic — avoid absurdly large or messy numbers. Answers should be clean numbers or common fractions.
+- Distractors must be values obtained from making exactly one calculation error (wrong sign, missed step, etc.).
+- Beginner: single-step arithmetic, simple DI table reading, basic percentage.
+- Intermediate: 2-3 step problems, number series, DI with percentage calculations, ratio-based work problems.
+- Advanced: caselet DI, quadratic equations, data sufficiency, multi-step mensuration, probability with P&C.`,
+
+  'quant-clerk': `You are an expert question setter for IBPS Clerk, SBI Clerk, and RRB Clerk — Quantitative Aptitude section (clerical-level difficulty).
+
+Rules:
+- Generate questions at IBPS Clerk Prelims + Mains difficulty level. Clerk-level quant is MODERATE — each question solvable in 30-45 seconds.
+- Cover these specific topic areas with balanced distribution:
+  * Number Series: simple patterns (addition, multiplication, alternating, squares/cubes)
+  * Simplification: BODMAS with manageable numbers, no estimation required
+  * Arithmetic:
+    - Percentage: direct percentage calculation, percentage increase/decrease, finding original value
+    - Profit & Loss: basic cost price / selling price / profit percent, successive discounts
+    - Ratio & Proportion: simple ratios, dividing amounts in given ratio, age-based ratio problems
+    - Time & Work: basic work problems (A takes X days, B takes Y days, together = ?), simple pipe problems
+    - Time, Speed & Distance: basic speed calculations, trains passing poles/platforms, average speed
+    - Simple Interest & Compound Interest: basic SI formula, finding rate/time/principal, SI vs CI difference
+    - Average: weighted average, average change when one item is added/removed
+    - Mensuration: area & perimeter of basic shapes (rectangle, circle, triangle), basic volume
+    - Number System: LCM, HCF, divisibility, remainders
+  * Data Interpretation: simple tables and bar graphs — direct reading with single-step calculation
+- Clerk-level characteristics: single to two-step calculations, no data sufficiency, no quadratic equations, no probability/P&C, simpler DI.
+- Numbers should be calculation-friendly (multiples of 5, 10, 25 — avoid messy fractions).
+- Each question must be fully self-contained. For DI, embed the data table in the question text.
+- Distractors must be plausible values from common arithmetic errors (wrong operation, decimal shift).
+- Beginner: direct formula application, single-step calculation, number series with obvious pattern.
+- Intermediate: 2-step arithmetic, simple DI, ratio + percentage combo, basic work/speed problems.
+- Advanced: multi-step arithmetic (3 steps max), DI with percentage comparison, age problems with ratios.`,
+
+  'english-grammar': `You are an expert question setter for Indian banking and government exams (IBPS PO/SO, SBI PO, IBPS Clerk, SSC CGL) — English Language section.
+
+Rules:
+- Generate EXACTLY ONE question per specific English grammar rule. Each question must focus on a SINGLE, clearly identified grammar rule.
+- The question text must NAME the grammar rule explicitly. Format: "Grammar Rule: [Rule Name] — [Question about the rule]"
+  Example: "Grammar Rule: Subject-Verb Agreement with Collective Nouns — Which of the following sentences demonstrates correct subject-verb agreement when a collective noun is the subject?"
+- Cover these grammar rule categories (distribute evenly across all questions in each batch):
+  * Subject-Verb Agreement (15 rules): collective nouns, indefinite pronouns (each/every/neither), compound subjects with and/or, intervening phrases, inverted sentences, there/here constructions, titles/amounts, relative pronoun agreement, etc.
+  * Tenses (15 rules): present perfect vs simple past, past perfect usage, future perfect, present continuous for future, conditional tenses (type 0/1/2/3), sequence of tenses, time clauses, reported speech tense shifts, etc.
+  * Articles (10 rules): definite vs indefinite, zero article, articles with uncountable nouns, articles with proper nouns (rivers/oceans/mountains), articles with superlatives, article omission rules, etc.
+  * Prepositions (10 rules): prepositions of time (at/on/in), prepositions of place, prepositional idioms (accused of/charged with), prepositions after adjectives, prepositions after verbs, confusing pairs (between/among, since/for), etc.
+  * Pronouns (8 rules): pronoun-antecedent agreement, reflexive pronouns, relative pronouns (who/whom/which/that), possessive vs contraction (its/it's, their/they're), vague pronoun reference, etc.
+  * Active & Passive Voice (8 rules): basic transformation, passive with modals, passive with phrasal verbs, double-object passives, when NOT to use passive, get-passive, etc.
+  * Direct & Indirect Speech (8 rules): reporting verbs, tense backshift rules, pronoun changes, time/place adverb changes, questions in reported speech, imperatives in reported speech, etc.
+  * Conjunctions & Connectors (8 rules): correlative conjunctions (either-or, neither-nor, not only-but also), subordinating conjunctions, conjunctive adverbs, comma splices, run-on sentences, etc.
+  * Modifiers (8 rules): dangling modifiers, misplaced modifiers, squinting modifiers, split infinitives, adjective vs adverb usage, degree of comparison (comparative/superlative), etc.
+  * Common Errors (10 rules): double negatives, redundancy (return back, revert back), parallelism, affect vs effect, lie vs lay, who vs whom, fewer vs less, farther vs further, etc.
+  * Sentence Structure (10 rules): sentence fragments, run-on sentences, comma splice, parallel structure, dangling participles, faulty comparison, incomplete comparisons, etc.
+  * Vocabulary & Idioms (10 rules): commonly confused words (accept/except, principal/principle), phrasal verbs tested in exams, one-word substitutions, idioms & phrases, etc.
+- Each question must present a sentence or set of sentences where the SPECIFIC grammar rule is being tested.
+- Distractors must be sentences with SUBTLE grammar errors related to the same rule (not obviously wrong).
+- The AI answer (generated later) will explain the grammar rule in depth — so the question just needs to TEST the rule.
+- Beginner: straightforward rule application (spot the correct sentence).
+- Intermediate: tricky cases within the rule (exceptions, edge cases, formal vs informal usage).
+- Advanced: sentences where multiple rules interact, or where the rule is tested in complex sentence structures common in banking exam English sections.`,
+};
+
+// ── Category-specific prompt instructions (fallback) ─────────────────────────
 
 const CATEGORY_PROMPTS: Record<string, string> = {
   // ── Developer / Tech topics ──────────────────────────────────────────
@@ -108,18 +334,13 @@ Rules:
 - Advanced: query plan optimization, lock contention, partitioning, replication lag, sharding, stored procedures.
 - Questions should be practical — the kind that separate junior from senior database engineers.`,
 
-  // ── Non-tech categories ──────────────────────────────────────────────
+  // ── Non-tech categories (fallback — topic-specific prompts override these) ─
   'Government Exams': `You are an expert question setter for Indian competitive exams (SSC CGL, UPSC Prelims, Banking PO, Railway RRB).
 Rules:
 - Generate questions at SSC CGL / UPSC Prelims / Banking PO difficulty level.
 - Use previous year exam paper style — concise, factual, tricky.
 - Distractors must be CLOSE and plausible (not obviously wrong).
-- Include questions that test application, not just rote recall.
-- For Static GK: focus on Indian history, geography, polity, economy, science facts, constitutional bodies.
-- For Current Affairs: focus on important events, schemes, awards, appointments from 2024-2025.
-- For Reasoning: include puzzles, coding-decoding, syllogisms, seating arrangement, blood relations.
-- For Quantitative Aptitude: include multi-step problems, DI, percentage, ratio, time & work.
-- For English Grammar: include sentence correction, fill in the blanks, idioms, reading comprehension style questions.`,
+- Include questions that test application, not just rote recall.`,
 
   'School (Class 5-10)': `You are an expert NCERT-based question setter for Indian school students (Class 5-10).
 Rules:
@@ -273,19 +494,6 @@ Rules:
 - Genetics, ecology, and human physiology are high-weightage — include more from these.`,
 };
 
-// ── Difficulty distribution ────────────────────────────────────────────
-
-interface DifficultyBatch {
-  difficulty: 'beginner' | 'intermediate' | 'advanced';
-  count: number;
-}
-
-const BATCHES: DifficultyBatch[] = [
-  { difficulty: 'beginner', count: 15 },
-  { difficulty: 'intermediate', count: 20 },
-  { difficulty: 'advanced', count: 15 },
-];
-
 // ── Helpers ────────────────────────────────────────────────────────────
 
 function sleep(ms: number): Promise<void> {
@@ -300,16 +508,19 @@ interface GeneratedQuestion {
 
 async function generateBatch(
   topicName: string,
+  topicSlug: string,
   topicCategory: string,
   difficulty: string,
   count: number,
   dryRun: boolean,
 ): Promise<GeneratedQuestion[]> {
-  const categoryPrompt =
+  // Topic-specific prompt takes priority, then category, then generic fallback
+  const promptText =
+    TOPIC_PROMPTS[topicSlug] ||
     CATEGORY_PROMPTS[topicCategory] ||
     'You are an expert educator generating high-quality exam questions.';
 
-  const systemPrompt = `${categoryPrompt}
+  const systemPrompt = `${promptText}
 
 Respond ONLY with valid JSON matching this schema:
 {"questions":[{"text":"string","tags":["string"]}]}
@@ -334,6 +545,9 @@ Remember: questions must be exam-quality, not trivial. Test real understanding.`
     return [];
   }
 
+  // Use higher token limit for larger batches
+  const maxTokens = count > 15 ? 8_000 : 4_000;
+
   const MAX_RETRIES = 3;
   let lastError: Error | undefined;
 
@@ -342,7 +556,7 @@ Remember: questions must be exam-quality, not trivial. Test real understanding.`
       const response = await openai.chat.completions.create({
         model: MODEL,
         temperature: 0.8,
-        max_tokens: 4_000,
+        max_tokens: maxTokens,
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: systemPrompt },
@@ -391,6 +605,7 @@ async function run() {
     : null;
   const dryRun = args.includes('--dry-run');
   const publishedOnly = args.includes('--published');
+  const force = args.includes('--force');
 
   await mongoose.connect(MONGODB_URI!);
   console.log('Connected to MongoDB');
@@ -429,31 +644,49 @@ async function run() {
   let totalFailed = 0;
 
   for (const topic of topics) {
-    console.log(`\n━━━ ${topic.name} (${topic.category}) ━━━`);
+    const targetCount = TOPIC_QUESTION_COUNTS[topic.slug] ?? DEFAULT_QUESTION_COUNT;
+    console.log(`\n━━━ ${topic.name} (${topic.category}) — target: ${targetCount} questions ━━━`);
 
     // Check how many questions already exist for this topic
     const existingCount = await db
       .collection('questions')
       .countDocuments({ topicId: topic._id, isActive: true });
 
-    if (existingCount >= 50) {
-      console.log(`  Already has ${existingCount} questions, skipping.`);
+    if (!force && existingCount >= targetCount) {
+      console.log(`  Already has ${existingCount} questions (target: ${targetCount}), skipping. Use --force to override.`);
       continue;
     }
 
+    if (existingCount > 0) {
+      console.log(`  Has ${existingCount} existing questions, generating to reach target of ${targetCount}.`);
+    }
+
     const allQuestions: GeneratedQuestion[] = [];
+    const batches = getBatches(topic.slug, targetCount);
 
-    for (const batch of BATCHES) {
-      const questions = await generateBatch(
-        topic.name,
-        topic.category,
-        batch.difficulty,
-        batch.count,
-        dryRun,
-      );
-      allQuestions.push(...questions);
+    for (const batch of batches) {
+      // Sub-batch large requests to maintain generation quality
+      let remaining = batch.count;
+      while (remaining > 0) {
+        const subBatchSize = Math.min(remaining, MAX_SUB_BATCH_SIZE);
+        const questions = await generateBatch(
+          topic.name,
+          topic.slug,
+          topic.category,
+          batch.difficulty,
+          subBatchSize,
+          dryRun,
+        );
+        allQuestions.push(...questions);
+        remaining -= subBatchSize;
 
-      // Rate-limit courtesy
+        // Rate-limit between sub-batches
+        if (!dryRun && remaining > 0) {
+          await sleep(DELAY_MS);
+        }
+      }
+
+      // Rate-limit between difficulty batches
       if (!dryRun) {
         await sleep(DELAY_MS);
       }
