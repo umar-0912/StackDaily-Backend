@@ -132,6 +132,14 @@ export class DailyFlowService {
       }
 
       // ── Process each topic independently ───────────────────────────────
+      const dailySelectionOps: Array<{
+        updateOne: {
+          filter: Record<string, unknown>;
+          update: Record<string, unknown>;
+          upsert: boolean;
+        };
+      }> = [];
+
       for (const topic of activeTopics) {
         try {
           const topicId = (topic as { _id: Types.ObjectId })._id;
@@ -201,29 +209,21 @@ export class DailyFlowService {
             });
           }
 
-          // ── Step 4: Create DailySelection record (idempotent) ──────────
-          await this.dailySelectionModel.bulkWrite([
-            {
-              updateOne: {
-                filter: { date: today, topicId },
-                update: {
-                  $setOnInsert: {
-                    date: today,
-                    topicId,
-                    questionId,
-                    ...(aiAnswerId ? { aiAnswerId } : {}),
-                    notificationsSent: 0,
-                  },
+          // ── Step 4: Collect DailySelection upsert operation ──────────
+          dailySelectionOps.push({
+            updateOne: {
+              filter: { date: today, topicId },
+              update: {
+                $setOnInsert: {
+                  date: today,
+                  topicId,
+                  questionId,
+                  ...(aiAnswerId ? { aiAnswerId } : {}),
+                  notificationsSent: 0,
                 },
-                upsert: true,
               },
+              upsert: true,
             },
-          ]);
-
-          this.logger.log({
-            msg: 'DailySelection record ensured',
-            date: today,
-            topicId: topicId.toString(),
           });
 
           summary.topicsProcessed++;
@@ -242,6 +242,16 @@ export class DailyFlowService {
           });
           summary.errors++;
         }
+      }
+
+      // ── Step 4b: Batch-write all DailySelection records at once ────────
+      if (dailySelectionOps.length > 0) {
+        await this.dailySelectionModel.bulkWrite(dailySelectionOps);
+        this.logger.log({
+          msg: 'DailySelection records batch-written',
+          date: today,
+          count: dailySelectionOps.length,
+        });
       }
 
       // ── Step 5: Send ONE personalized notification per user ────────────
@@ -346,85 +356,106 @@ export class DailyFlowService {
       topicDocs.map((t) => [t._id.toString(), t]),
     );
 
-    // ── Build personalized feed per topic (in parallel) ──────────────────
-    const feedItems = await Promise.all(
+    // ── Phase 1: Resolve next questions for all topics in parallel ───────
+    const questionResults = await Promise.all(
       feedTopicIds.map(async (topicId) => {
         const topicIdStr = topicId.toString();
-
         try {
-          // Get the next question for this user in this topic
           const { question, progress } =
             await this.progressService.getNextQuestion(userId, topicIdStr);
-
-          if (!question) {
-            return null; // No questions available for this topic
-          }
-
-          const questionId = (question as any)._id;
-
-          // Look up AI answer for this question
-          const aiAnswer = await this.aiAnswerModel
-            .findOne({ questionId })
-            .lean()
-            .exec();
-
-          // Get topic from pre-fetched map
-          const topic = topicMap.get(topicIdStr);
-          if (!topic) {
-            return null;
-          }
-
-          // Get total question count for progress calculation
-          const totalQuestions =
-            await this.progressService.countActiveQuestions(topicIdStr);
-
-          // Use a stable ID for the feed item (progress record ID)
-          const feedItemId = (progress as any)._id?.toString() || topicIdStr;
-
-          // Compute read/advance flags
-          const today = this.getTodayDate();
-          const isRead = progress.lastQuestionDate === `${today}:read`;
-          const canAdvance =
-            isRead && (progress as any).lastAdvancedDate !== today;
-
-          return {
-            dailySelectionId: feedItemId,
-            topic: {
-              _id: topicIdStr,
-              name: topic.name,
-              slug: topic.slug,
-              icon: (topic as any).icon || null,
-            },
-            question: {
-              text: (question as any).text,
-              difficulty: (question as any).difficulty,
-              tags: (question as any).tags || [],
-            },
-            answer: {
-              content: aiAnswer?.answer || '',
-              generatedAt: aiAnswer?.generatedAt || null,
-              mcqs: aiAnswer?.mcqs || [],
-            },
-            progress: {
-              status: progress.status,
-              questionsAnswered: progress.questionsAnswered,
-              totalQuestions,
-              currentDifficulty: (question as any).difficulty,
-              isRead,
-              canAdvance,
-            },
-          } as DailyFeedItemDto;
+          return { topicIdStr, question, progress };
         } catch (error: any) {
           this.logger.error({
-            msg: 'Error building feed item for topic',
+            msg: 'Error fetching next question for topic',
             userId,
             topicId: topicIdStr,
             error: error.message,
           });
-          return null;
+          return { topicIdStr, question: null, progress: null };
         }
       }),
     );
+
+    // ── Phase 2: Batch-fetch AI answers + question counts (eliminates N+1) ─
+    const resolvedQuestionIds = questionResults
+      .filter((r) => r.question)
+      .map((r) => (r.question as any)._id);
+
+    const feedTopicObjectIds = feedTopicIds.map(
+      (id) => new Types.ObjectId(id.toString()),
+    );
+
+    const [aiAnswers, questionCounts] = await Promise.all([
+      resolvedQuestionIds.length > 0
+        ? this.aiAnswerModel
+            .find({ questionId: { $in: resolvedQuestionIds } })
+            .lean()
+            .exec()
+        : Promise.resolve([]),
+      this.questionModel
+        .aggregate([
+          { $match: { topicId: { $in: feedTopicObjectIds }, isActive: true } },
+          { $group: { _id: '$topicId', count: { $sum: 1 } } },
+        ])
+        .exec(),
+    ]);
+
+    const aiAnswerMap = new Map(
+      aiAnswers.map((a) => [a.questionId.toString(), a]),
+    );
+    const questionCountMap = new Map(
+      questionCounts.map((c: { _id: Types.ObjectId; count: number }) => [
+        c._id.toString(),
+        c.count,
+      ]),
+    );
+
+    // ── Phase 3: Assemble feed items using pre-fetched maps ───────────────
+    const today = this.getTodayDate();
+
+    const feedItems = questionResults.map((result) => {
+      const { topicIdStr, question, progress } = result;
+
+      if (!question || !progress) return null;
+
+      const topic = topicMap.get(topicIdStr);
+      if (!topic) return null;
+
+      const questionId = (question as any)._id;
+      const aiAnswer = aiAnswerMap.get(questionId.toString());
+      const totalQuestions = questionCountMap.get(topicIdStr) || 0;
+      const feedItemId = (progress as any)._id?.toString() || topicIdStr;
+      const isRead = progress.lastQuestionDate === `${today}:read`;
+      const canAdvance = isRead && (progress as any).lastAdvancedDate !== today;
+
+      return {
+        dailySelectionId: feedItemId,
+        topic: {
+          _id: topicIdStr,
+          name: topic.name,
+          slug: topic.slug,
+          icon: (topic as any).icon || null,
+        },
+        question: {
+          text: (question as any).text,
+          difficulty: (question as any).difficulty,
+          tags: (question as any).tags || [],
+        },
+        answer: {
+          content: aiAnswer?.answer || '',
+          generatedAt: aiAnswer?.generatedAt || null,
+          mcqs: aiAnswer?.mcqs || [],
+        },
+        progress: {
+          status: progress.status,
+          questionsAnswered: progress.questionsAnswered,
+          totalQuestions,
+          currentDifficulty: (question as any).difficulty,
+          isRead,
+          canAdvance,
+        },
+      } as DailyFeedItemDto;
+    });
 
     // Filter out null items (topics with no questions or errors)
     const validFeedItems = feedItems.filter(
@@ -551,25 +582,16 @@ export class DailyFlowService {
 
     const questionId = (question as any)._id;
 
-    // Look up AI answer
-    const aiAnswer = await this.aiAnswerModel
-      .findOne({ questionId })
-      .lean()
-      .exec();
-
-    // Look up topic
-    const topic = await this.topicModel
-      .findById(topicId)
-      .select('name slug icon')
-      .lean()
-      .exec();
+    // Parallelize independent lookups (AI answer, topic, question count)
+    const [aiAnswer, topic, totalQuestions] = await Promise.all([
+      this.aiAnswerModel.findOne({ questionId }).lean().exec(),
+      this.topicModel.findById(topicId).select('name slug icon').lean().exec(),
+      this.progressService.countActiveQuestions(topicId),
+    ]);
 
     if (!topic) {
       return null;
     }
-
-    const totalQuestions =
-      await this.progressService.countActiveQuestions(topicId);
 
     const feedItemId = (progress as any)._id?.toString() || topicId;
 

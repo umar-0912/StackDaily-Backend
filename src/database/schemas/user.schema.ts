@@ -230,3 +230,10 @@ UserSchema.index({ 'subscription.plan': 1 });
 
 // Sparse unique index for Google Sign-In users
 UserSchema.index({ googleId: 1 }, { unique: true, sparse: true });
+
+// Compound index for subscription expiry cron (plan + status + endDate)
+UserSchema.index({
+  'subscription.plan': 1,
+  'subscription.status': 1,
+  'subscription.endDate': 1,
+});

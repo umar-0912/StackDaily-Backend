@@ -155,8 +155,39 @@ export class AuthService {
 
       // Handle MongoDB duplicate key error
       if ((error as any)?.code === 11000) {
+        const keyPattern = (error as any).keyPattern || {};
+
+        // Username collision from race condition — retry with timestamp fallback
+        if (keyPattern.username) {
+          this.logger.warn(
+            { email: dto.email },
+            'Signup: username race condition, retrying with fallback username',
+          );
+          const fallbackUsername = `${dto.name.replace(/\s+/g, '').toLowerCase().slice(0, 20)}${Date.now().toString(36)}`;
+          const hashedPw = await bcrypt.hash(dto.password, AuthService.BCRYPT_ROUNDS);
+          const retryUser = await this.userModel.create({
+            email: dto.email.toLowerCase(),
+            name: dto.name.trim(),
+            username: fallbackUsername,
+            password: hashedPw,
+            subscribedTopics: dto.subscribedTopics || [],
+          });
+          await retryUser.populate({ path: 'subscribedTopics', select: 'name slug icon' });
+
+          const otp = this.generateOtp();
+          await this.setOtpOnUser(retryUser._id.toString(), otp, OtpType.EMAIL_VERIFICATION);
+          this.emailService.sendOtpEmail(retryUser.email, otp, 'verification').catch((err) => {
+            this.logger.error({ err, userId: retryUser._id }, 'Failed to send OTP after username retry');
+          });
+
+          const tokens = await this.generateTokens(retryUser._id.toString(), retryUser.email, retryUser.role);
+          const userObj = retryUser.toObject();
+          const { password: _pw, ...userWithoutPw } = userObj;
+          return { ...tokens, user: userWithoutPw as unknown as AuthResponseDto['user'] };
+        }
+
         this.logger.warn(
-          { email: dto.email, keyPattern: (error as any).keyPattern },
+          { email: dto.email, keyPattern },
           'Signup failed: duplicate key error',
         );
         throw new ConflictException(ERROR_MESSAGES.EMAIL_ALREADY_EXISTS);

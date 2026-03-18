@@ -736,9 +736,7 @@ export class UsersService {
     if (historySet.size <= planConfig.maxTopics) return;
 
     // Check if all requested topics are already in history (re-subscriptions only)
-    const allInHistory = requestedTopicIds.every((id) =>
-      topicSubscriptionHistory.includes(id),
-    );
+    const allInHistory = requestedTopicIds.every((id) => historySet.has(id));
     if (allInHistory) return;
 
     throw new BadRequestException(ERROR_MESSAGES.SUBSCRIPTION_TOPIC_LIMIT);

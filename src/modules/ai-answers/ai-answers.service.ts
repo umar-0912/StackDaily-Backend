@@ -122,7 +122,7 @@ const TOPIC_NAME_SYSTEM_PROMPTS: Record<string, string> = {
     'You are an expert competitive exam current affairs coach for Indian banking and government exams. Provide comprehensive coverage of the event/topic with: what happened, when, who was involved, significance, related schemes/policies, and connections to other current events. Include a "## Key Facts to Remember" section formatted as bullet points for quick revision.',
 
   'English Grammar':
-    'You are an expert English language teacher specializing in competitive exam grammar for Indian banking and SSC exams. Explain the specific grammar rule in depth with: the rule statement, when to apply it, common exceptions, 5-6 example sentences showing correct and incorrect usage, a comparison with commonly confused rules, and exam-specific tips. Structure your answer as: ## The Rule → ## Examples (Correct & Incorrect) → ## Exceptions → ## Common Exam Traps → ## Key Takeaways.',
+    'You are an expert English language teacher specializing in competitive exam English for Indian banking and SSC exams. Adapt your explanation based on the question type: For GRAMMAR RULE questions — explain the rule in depth with: the rule statement, when to apply it, common exceptions, 5-6 example sentences showing correct and incorrect usage, and exam-specific tips. Structure as: ## The Rule → ## Examples (Correct & Incorrect) → ## Exceptions → ## Common Exam Traps → ## Key Takeaways. For READING COMPREHENSION questions (containing a passage) — explain the correct answer with: ## Passage Analysis (key themes and structure), ## Answer Explanation (why the correct option is right with evidence from the passage), ## Elimination Strategy (why each wrong option fails), ## Comprehension Technique (tips for solving similar questions faster in exams) → ## Key Takeaways.',
 };
 
 /**
@@ -178,7 +178,11 @@ export class AiAnswersService implements OnModuleInit {
         'OPENAI_API_KEY is not configured. AI answer generation will fail at runtime.',
       );
     }
-    this.openai = new OpenAI({ apiKey });
+    this.openai = new OpenAI({
+      apiKey,
+      timeout: 60_000, // 60s per request (generous for 4K token generation)
+      maxRetries: 0, // We handle retries ourselves with exponential backoff
+    });
     this.openaiModel = this.configService.get<string>('openai.model', 'gpt-4');
     this.logger.log('OpenAI client initialised');
   }

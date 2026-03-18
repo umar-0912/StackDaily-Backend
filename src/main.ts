@@ -33,7 +33,7 @@ async function bootstrap(): Promise<void> {
 
   // ─── Request Timeout ─────────────────────────────────────────
   const server = app.getHttpServer();
-  server.setTimeout(30_000); // 30 second timeout
+  server.setTimeout(120_000); // 2 minute timeout (AI generation endpoints can take 30-60s)
 
   // Use Pino as the application logger
   app.useLogger(app.get(PinoLogger));
