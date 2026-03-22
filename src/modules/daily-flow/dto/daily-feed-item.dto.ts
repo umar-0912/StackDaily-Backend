@@ -29,6 +29,13 @@ class FeedTopicDto {
     nullable: true,
   })
   icon?: string | null;
+
+  @ApiProperty({
+    description: 'Content type of the topic',
+    enum: ['question', 'vocabulary'],
+    example: 'question',
+  })
+  contentType: string;
 }
 
 /**

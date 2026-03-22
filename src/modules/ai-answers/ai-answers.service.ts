@@ -67,6 +67,10 @@ const CATEGORY_SYSTEM_PROMPTS: Record<string, string> = {
   Databases:
     'You are a database architect and educator. Explain with actual SQL/NoSQL query examples, execution plan analysis, indexing strategies, schema design patterns, and performance tuning techniques.',
 
+  // English
+  English:
+    'You are an expert English vocabulary and language coach for competitive exams (UPSC, IBPS, SSC, GRE). Format vocabulary word lists as clear study cards with meanings, forms, synonyms, antonyms, and example sentences. Include memory aids and exam-focused tips.',
+
   // Government Exams (category-level fallback)
   'Government Exams':
     'You are an expert competitive exam preparation coach for Indian government exams (SSC CGL, UPSC, Banking PO/SO, Railways). Provide comprehensive factual explanations with memory tricks, mnemonics, comparison tables, and frequently asked patterns. Cover all angles a question can be asked from.',
@@ -123,6 +127,9 @@ const TOPIC_NAME_SYSTEM_PROMPTS: Record<string, string> = {
 
   'English Grammar':
     'You are an expert English language teacher specializing in competitive exam English for Indian banking and SSC exams. Adapt your explanation based on the question type: For GRAMMAR RULE questions — explain the rule in depth with: the rule statement, when to apply it, common exceptions, 5-6 example sentences showing correct and incorrect usage, and exam-specific tips. Structure as: ## The Rule → ## Examples (Correct & Incorrect) → ## Exceptions → ## Common Exam Traps → ## Key Takeaways. For READING COMPREHENSION questions (containing a passage) — explain the correct answer with: ## Passage Analysis (key themes and structure), ## Answer Explanation (why the correct option is right with evidence from the passage), ## Elimination Strategy (why each wrong option fails), ## Comprehension Technique (tips for solving similar questions faster in exams) → ## Key Takeaways.',
+
+  'English Vocabulary':
+    'You are an expert English vocabulary coach for competitive exams (UPSC, IBPS PO/SO, SBI PO, SSC CGL, CAT, GRE). The user will provide a list of 15 vocabulary words with their meanings, forms, synonyms, antonyms, and examples. Words marked "(REVISION)" are from previous days for spaced repetition. Your task: 1) Format each word as a clear study card with: ## Word (with REVISION tag if applicable), **Meaning**, **Forms**, **Synonyms**, **Antonym**, **Example** (in blockquote). 2) Add a "## Key Takeaways" section with study tips and revision reminders. 3) Generate 4 MCQs testing: definition matching, synonym identification, antonym identification, and contextual usage. MCQs must use plausible distractors from the same difficulty level. Test different words — do not repeat the same word twice across MCQs.',
 };
 
 /**
@@ -327,8 +334,19 @@ export class AiAnswersService implements OnModuleInit {
     const topicName = topic?.name ?? 'General';
     const topicCategory = topic?.category ?? '';
 
+    // For vocabulary questions, build prompt from embedded words array
+    const questionContent =
+      (topic as any).contentType === 'vocabulary' && question.words?.length
+        ? question.words
+            .map(
+              (w: any) =>
+                `${w.word}${w.isRevision ? ' (REVISION)' : ''}: ${w.meaning} | Forms: ${w.forms} | Synonyms: ${w.synonyms.join(', ')} | Antonym: ${w.antonym} | Example: ${w.example}`,
+            )
+            .join('\n')
+        : question.text;
+
     const { answer, mcqs, tokenCount } = await this.generateAnswer(
-      question.text,
+      questionContent,
       topicName,
       question.difficulty,
       topicCategory,

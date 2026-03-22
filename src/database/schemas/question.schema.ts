@@ -9,6 +9,34 @@ export enum QuestionDifficulty {
   ADVANCED = 'advanced',
 }
 
+// ── Vocabulary word sub-document (embedded in Question for vocabulary topics) ──
+
+@Schema({ _id: false })
+export class VocabWord {
+  @Prop({ type: String, required: true })
+  word: string;
+
+  @Prop({ type: String, required: true })
+  meaning: string;
+
+  @Prop({ type: String, required: true })
+  forms: string;
+
+  @Prop({ type: [String], required: true })
+  synonyms: string[];
+
+  @Prop({ type: String, required: true })
+  antonym: string;
+
+  @Prop({ type: String, required: true })
+  example: string;
+
+  @Prop({ type: Boolean, default: false })
+  isRevision: boolean;
+}
+
+export const VocabWordSchema = SchemaFactory.createForClass(VocabWord);
+
 @Schema({
   timestamps: true,
   toJSON: {
@@ -69,6 +97,9 @@ export class Question {
     default: 0,
   })
   usageCount: number;
+
+  @Prop({ type: [VocabWordSchema], default: undefined })
+  words?: VocabWord[];
 }
 
 export const QuestionSchema = SchemaFactory.createForClass(Question);

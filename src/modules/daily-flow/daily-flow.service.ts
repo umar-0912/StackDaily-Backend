@@ -348,7 +348,7 @@ export class DailyFlowService {
     // ── Batch-fetch topic details upfront (avoids N+1) ──────────────────
     const topicDocs = await this.topicModel
       .find({ _id: { $in: feedTopicIds } })
-      .select('name slug icon')
+      .select('name slug icon contentType')
       .lean()
       .exec();
 
@@ -435,6 +435,7 @@ export class DailyFlowService {
           name: topic.name,
           slug: topic.slug,
           icon: (topic as any).icon || null,
+          contentType: (topic as any).contentType || 'question',
         },
         question: {
           text: (question as any).text,
@@ -585,7 +586,7 @@ export class DailyFlowService {
     // Parallelize independent lookups (AI answer, topic, question count)
     const [aiAnswer, topic, totalQuestions] = await Promise.all([
       this.aiAnswerModel.findOne({ questionId }).lean().exec(),
-      this.topicModel.findById(topicId).select('name slug icon').lean().exec(),
+      this.topicModel.findById(topicId).select('name slug icon contentType').lean().exec(),
       this.progressService.countActiveQuestions(topicId),
     ]);
 
@@ -602,6 +603,7 @@ export class DailyFlowService {
         name: topic.name,
         slug: topic.slug,
         icon: (topic as any).icon || null,
+        contentType: (topic as any).contentType || 'question',
       },
       question: {
         text: (question as any).text,

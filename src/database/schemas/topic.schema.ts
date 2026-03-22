@@ -1,6 +1,11 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
 
+export enum TopicContentType {
+  QUESTION = 'question',
+  VOCABULARY = 'vocabulary',
+}
+
 export type TopicDocument = HydratedDocument<Topic>;
 
 @Schema({
@@ -61,6 +66,13 @@ export class Topic {
     default: false,
   })
   isPublished: boolean;
+
+  @Prop({
+    type: String,
+    enum: TopicContentType,
+    default: TopicContentType.QUESTION,
+  })
+  contentType: TopicContentType;
 
   @Prop({
     type: Number,
